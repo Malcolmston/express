@@ -144,7 +144,6 @@ func (r *Router) Use(args ...any) *Router {
 // order. The done callback is invoked when the stack is exhausted (or an error
 // escapes it) so parent routers / the app can finish the response.
 func (r *Router) handle(req *Request, res *Response, done Next) {
-	basePath := req.path // path relative to this router's mount point
 	idx := 0
 	var carriedErr error
 
@@ -156,6 +155,11 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 		for idx < len(r.stack) {
 			l := r.stack[idx]
 			idx++
+
+			// The match path is read live from the request so that middleware
+			// which rewrites the path (via req.SetPath) re-routes subsequent
+			// layers. It is relative to this router's mount point.
+			basePath := req.path
 
 			// Method must match for route layers (middleware has method "").
 			if l.method != "" && !strings.EqualFold(l.method, req.Method()) {

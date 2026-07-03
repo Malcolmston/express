@@ -73,6 +73,17 @@ func (req *Request) Method() string { return req.Raw.Method }
 // Path returns the request URL path (without query string).
 func (req *Request) Path() string { return req.Raw.URL.Path }
 
+// SetPath rewrites the request path and, crucially, the path used by the
+// router to match routes. Middleware that rewrites URLs (rewrite, basepath,
+// ...) must call SetPath rather than mutating req.Raw.URL.Path directly, so
+// that route matching downstream sees the new path. It also updates
+// req.Raw.URL.Path so handlers observe a consistent value.
+func (req *Request) SetPath(p string) {
+	p = cleanPath(p)
+	req.path = p
+	req.Raw.URL.Path = p
+}
+
 // OriginalURL returns the full request URI as received.
 func (req *Request) OriginalURL() string { return req.Raw.URL.RequestURI() }
 

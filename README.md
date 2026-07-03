@@ -103,6 +103,7 @@ app.Use(func(err error, req *express.Request, res *express.Response, next expres
 | Method | Description |
 | ------ | ----------- |
 | `req.Params(name)` | route parameter |
+| `req.SetPath(p)` | rewrite the path *and* the router's match path (re-routes) |
 | `req.Query(name)` | query-string value |
 | `req.Get(field)` | request header |
 | `req.Body()` | parsed body (after a body-parser middleware) |

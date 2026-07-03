@@ -65,7 +65,9 @@ func New(opts ...Options) express.Handler {
 		path := req.Raw.URL.Path
 		for _, r := range rules {
 			if r.re.MatchString(path) {
-				req.Raw.URL.Path = r.re.ReplaceAllString(path, r.to)
+				// SetPath updates the router's match path so the rewrite
+				// actually re-routes, not just changes what handlers observe.
+				req.SetPath(r.re.ReplaceAllString(path, r.to))
 				break
 			}
 		}

@@ -39,7 +39,9 @@ func New(opts Options) express.Handler {
 			if stripped == "" {
 				stripped = "/"
 			}
-			req.Raw.URL.Path = stripped
+			// SetPath updates the router's match path so downstream routes are
+			// matched against the stripped path.
+			req.SetPath(stripped)
 			next()
 			return
 		}
