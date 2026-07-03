@@ -239,6 +239,51 @@ Available rules: `Required`, `Optional`, `Email`, `MinLen`, `MaxLen`, `Min`,
 `Max`, `IsInt`, `IsNumber`, `In`, `Matches`, and `Custom`. Use `schema.Query()`
 to validate the query string instead of the body.
 
+## Streaming & chunked responses
+
+The response supports incremental, flushed output for large or open-ended
+bodies. `*Response` implements `io.Writer`, so it drops into `io.Copy` and
+`fmt.Fprintf`.
+
+```go
+// Stream a body chunk-by-chunk (each write is flushed to the client).
+app.Get("/stream", func(req *express.Request, res *express.Response, next express.Next) {
+	res.Type("text").Stream(func(w io.Writer) error {
+		for i := 0; i < 10; i++ {
+			fmt.Fprintf(w, "line %d\n", i)
+		}
+		return nil
+	})
+})
+
+// Copy a large reader to the client in chunks without buffering it all.
+res.SendStream(file)               // default 32 KiB chunks
+res.SendChunked(bigBytes, 64<<10)  // fixed-size chunks from memory
+res.WriteChunk([]byte("partial"))  // low-level: write + flush
+res.Flush()                        // flush buffered data
+```
+
+### Server-Sent Events
+
+```go
+app.Get("/events", func(req *express.Request, res *express.Response, next express.Next) {
+	sse := res.SSE() // sets text/event-stream headers and flushes them
+	for {
+		select {
+		case <-req.Raw.Context().Done():
+			return
+		case ev := <-updates:
+			sse.SendJSON("update", ev)   // event: update\ndata: {...}
+		case <-ticker.C:
+			sse.Comment("keep-alive")
+		}
+	}
+})
+```
+
+`SSEWriter` provides `Send`, `SendData`, `SendJSON`, `SendID` (for
+`Last-Event-ID` resumption), `Comment`, and `Retry`.
+
 ## Using with net/http
 
 An `*express.Application` is an `http.Handler`, so it drops into anything that
