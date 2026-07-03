@@ -89,6 +89,19 @@ func (r *Router) Options(path string, handlers ...Handler) *Router {
 	return r.method("OPTIONS", path, handlers)
 }
 
+// Query registers handlers for the HTTP QUERY method
+// (https://www.ietf.org/archive/id/draft-ietf-httpbis-safe-method-w-body-latest.html),
+// a safe, idempotent method that carries a request body — like GET, but with a
+// payload used to describe the query. Express added app.query() for it; this is
+// the Go equivalent.
+func (r *Router) Query(path string, handlers ...Handler) *Router {
+	return r.method(MethodQuery, path, handlers)
+}
+
+// MethodQuery is the QUERY HTTP method token. It is not yet part of the
+// standard library's net/http method constants, so it is defined here.
+const MethodQuery = "QUERY"
+
 // All registers handlers that run for every HTTP method matching path.
 func (r *Router) All(path string, handlers ...Handler) *Router { return r.method("", path, handlers) }
 

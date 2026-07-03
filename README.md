@@ -56,7 +56,11 @@ app.Put("/users/:id", handler)
 app.Delete("/users/:id", handler)
 app.Patch("/users/:id", handler)
 app.All("/health", handler)        // any method
+app.Query("/search", handler)      // the new HTTP QUERY method (safe, with a body)
 ```
+
+The `QUERY` method is the emerging IETF safe-with-body method; `app.Query`
+mirrors Express's `app.query()`.
 
 Route parameters are read with `req.Params("id")`. A `*` in a path is a
 wildcard captured as the `*` parameter.
@@ -134,6 +138,31 @@ Most response methods return `*Response` so they can be chained:
 - `express.Session(opts...)` — cookie-backed sessions (see below).
 - `express.Logger()` — log method, path, status, and duration.
 - `express.Recover()` — recover from panics and return a 500.
+
+## Middleware suite (100+ packages)
+
+Beyond the bundled middleware above, `express` ships a large catalog of
+ready-to-use middleware under [`middleware/`](middleware/) — over 100 independent
+subpackages spanning security headers, authentication/access control, body &
+response transforms, rate limiting & traffic control, routing/static helpers,
+cookies/CSRF/sessions, and dev utilities. Each has a `New(...)` constructor and
+is standard-library only.
+
+```go
+import (
+	"github.com/malcolmston/express/middleware/cors"
+	"github.com/malcolmston/express/middleware/helmet"
+	"github.com/malcolmston/express/middleware/ratelimit"
+	"github.com/malcolmston/express/middleware/compression"
+)
+
+app.Use(helmet.New())
+app.Use(cors.New(cors.Options{AllowOrigins: []string{"https://example.com"}}))
+app.Use(compression.New())
+app.Use(ratelimit.New(ratelimit.Options{Max: 100, Window: time.Minute}))
+```
+
+See [MIDDLEWARE.md](MIDDLEWARE.md) for the full catalog.
 
 ## Sessions
 
