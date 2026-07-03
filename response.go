@@ -22,6 +22,18 @@ type Response struct {
 	// Locals holds values scoped to this request/response cycle, mirroring
 	// Express's res.locals.
 	Locals map[string]any
+
+	// beforeWrite holds hooks run exactly once, just before the response
+	// headers are committed. Middleware such as Session uses this to flush a
+	// Set-Cookie header before the status line is written.
+	beforeWrite []func()
+}
+
+// OnBeforeWrite registers a callback invoked once, immediately before the
+// response headers are committed. Use it to set headers or cookies that depend
+// on work done during the request (e.g. persisting a session).
+func (res *Response) OnBeforeWrite(fn func()) {
+	res.beforeWrite = append(res.beforeWrite, fn)
 }
 
 func newResponse(w http.ResponseWriter, req *Request, app *Application) *Response {
@@ -87,6 +99,11 @@ func (res *Response) writeHeaderOnce() {
 	if res.written {
 		return
 	}
+	// Run before-write hooks while headers are still mutable.
+	for _, fn := range res.beforeWrite {
+		fn()
+	}
+	res.beforeWrite = nil
 	res.written = true
 	if res.app != nil && res.app.Enabled("x-powered-by") && res.GetHeader("X-Powered-By") == "" {
 		res.Writer.Header().Set("X-Powered-By", "Express")

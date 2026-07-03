@@ -128,9 +128,87 @@ Most response methods return `*Response` so they can be chained:
 
 - `express.JSON()` — parse `application/json` bodies into `req.Body()`.
 - `express.URLEncoded()` — parse form-encoded bodies.
+- `express.Text()` — parse `text/plain` bodies into `req.Body()`.
+- `express.Multipart(maxMemory)` — parse `multipart/form-data` (file uploads).
 - `express.Static(root)` — serve static files from a directory.
+- `express.Session(opts...)` — cookie-backed sessions (see below).
 - `express.Logger()` — log method, path, status, and duration.
 - `express.Recover()` — recover from panics and return a 500.
+
+## Sessions
+
+`express.Session()` adds a cookie-backed session, persisted through a pluggable
+`SessionStore` (an in-memory store is the default). Read and write it with
+`req.Session()`; changes are saved automatically just before the response is
+sent.
+
+```go
+app.Use(express.Session(express.SessionOptions{
+	Name:   "sid",
+	Secure: true, // HTTPS only
+	// Store: myRedisStore,
+}))
+
+app.Post("/login", func(req *express.Request, res *express.Response, next express.Next) {
+	sess := req.Session()
+	sess.Regenerate()          // new id on privilege change (anti-fixation)
+	sess.Set("userID", "42")
+	res.Send("logged in")
+})
+
+app.Get("/me", func(req *express.Request, res *express.Response, next express.Next) {
+	res.Send("user " + req.Session().GetString("userID"))
+})
+
+app.Post("/logout", func(req *express.Request, res *express.Response, next express.Next) {
+	req.Session().Destroy()
+	res.Send("bye")
+})
+```
+
+## File uploads & forms
+
+```go
+app.Use(express.Multipart(0)) // 0 = 32 MiB default in-memory buffer
+
+app.Post("/avatar", func(req *express.Request, res *express.Response, next express.Next) {
+	file, header, err := req.FormFile("avatar")
+	if err != nil {
+		next(err)
+		return
+	}
+	defer file.Close()
+	res.JSON(map[string]any{"filename": header.Filename, "caption": req.FormValue("caption")})
+})
+```
+
+`req.Form()` returns all form values (query + body) as `url.Values`; `req.Files(name)`
+returns every uploaded file header for a field.
+
+## Input validation
+
+The [`validator`](validator/) subpackage provides fluent request validation in
+the spirit of `express-validator`. Build a `Schema` and mount it as middleware
+that rejects invalid requests with a `400` JSON body — or call `Validate` on a
+map directly.
+
+```go
+import "github.com/malcolmston/express/validator"
+
+schema := validator.Schema{
+	validator.Field("email").Required().Email(),
+	validator.Field("age").Optional().IsInt().Min(0).Max(120),
+	validator.Field("name").Required().MinLen(2).MaxLen(50),
+	validator.Field("role").Required().In("admin", "user"),
+}
+
+app.Use(express.JSON())
+app.Post("/users", schema.Body(), createUser) // 400 {"errors":[...]} on failure
+```
+
+Available rules: `Required`, `Optional`, `Email`, `MinLen`, `MaxLen`, `Min`,
+`Max`, `IsInt`, `IsNumber`, `In`, `Matches`, and `Custom`. Use `schema.Query()`
+to validate the query string instead of the body.
 
 ## Using with net/http
 
