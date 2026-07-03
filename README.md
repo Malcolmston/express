@@ -228,6 +228,12 @@ A runnable example lives in [`examples/basic`](examples/basic/main.go):
 go run ./examples/basic
 ```
 
+## Compatibility
+
+This is a Go re-implementation modeled on Express.js, targeting API/behavior
+parity and standards-compliant HTTP output. See [COMPATIBILITY.md](COMPATIBILITY.md)
+for a feature-by-feature parity table and known gaps.
+
 ## Companion library
 
 Pair this with [`passport`](https://github.com/malcolmston/passport) — a Go port
