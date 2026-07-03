@@ -30,18 +30,28 @@ type Application struct {
 	// locals are variables shared across the lifetime of the app and made
 	// available to every request via res.Locals merged at request time.
 	locals map[string]any
+
+	// viewEngines maps a file extension (".html", ".tmpl", ...) to the
+	// template engine used to render views for res.Render.
+	viewEngines map[string]EngineFunc
 }
 
 // New creates a new express Application.
 func New() *Application {
 	app := &Application{
-		Router:   NewRouter(),
-		settings: make(map[string]any),
-		locals:   make(map[string]any),
+		Router:      NewRouter(),
+		settings:    make(map[string]any),
+		locals:      make(map[string]any),
+		viewEngines: make(map[string]EngineFunc),
 	}
 	// Sensible defaults mirroring Express.
 	app.settings["env"] = "development"
 	app.settings["x-powered-by"] = true
+	app.settings["views"] = "views"
+	app.settings["view engine"] = "html"
+	// Register the built-in html/template engine.
+	app.Engine(".html", htmlTemplateEngine)
+	app.Engine(".tmpl", htmlTemplateEngine)
 	return app
 }
 

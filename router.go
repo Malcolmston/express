@@ -34,8 +34,59 @@ type layer struct {
 // root Router, and additional routers can be created and mounted to compose
 // modular route handlers.
 type Router struct {
-	stack []*layer
+	stack          []*layer
+	paramCallbacks map[string][]ParamHandler
 }
+
+// ParamHandler processes a captured route parameter before the route's handlers
+// run. It receives the parameter's value and, like any handler, must call next
+// to continue (or next(err) to fail).
+type ParamHandler func(req *Request, res *Response, next Next, value string)
+
+// Param registers a callback that runs when name is captured as a route
+// parameter, once per request, before the matched route's handlers — the
+// equivalent of Express's app.param(). Typical use is to load a record by id.
+func (r *Router) Param(name string, fn ParamHandler) *Router {
+	if r.paramCallbacks == nil {
+		r.paramCallbacks = make(map[string][]ParamHandler)
+	}
+	r.paramCallbacks[name] = append(r.paramCallbacks[name], fn)
+	return r
+}
+
+// Route returns a Route bound to path, allowing several HTTP methods to be
+// registered for the same path in a chain — the equivalent of app.route(path):
+//
+//	app.Route("/users").
+//		Get(list).
+//		Post(create)
+func (r *Router) Route(path string) *Route {
+	return &Route{router: r, path: path}
+}
+
+// Route binds handlers for multiple HTTP methods to a single path.
+type Route struct {
+	router *Router
+	path   string
+}
+
+// Get registers GET handlers on the route.
+func (rt *Route) Get(h ...Handler) *Route { rt.router.Get(rt.path, h...); return rt }
+
+// Post registers POST handlers on the route.
+func (rt *Route) Post(h ...Handler) *Route { rt.router.Post(rt.path, h...); return rt }
+
+// Put registers PUT handlers on the route.
+func (rt *Route) Put(h ...Handler) *Route { rt.router.Put(rt.path, h...); return rt }
+
+// Delete registers DELETE handlers on the route.
+func (rt *Route) Delete(h ...Handler) *Route { rt.router.Delete(rt.path, h...); return rt }
+
+// Patch registers PATCH handlers on the route.
+func (rt *Route) Patch(h ...Handler) *Route { rt.router.Patch(rt.path, h...); return rt }
+
+// All registers handlers for every method on the route.
+func (rt *Route) All(h ...Handler) *Route { rt.router.All(rt.path, h...); return rt }
 
 // NewRouter creates an empty Router.
 func NewRouter() *Router {
@@ -196,7 +247,7 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 			if l.handler == nil {
 				continue
 			}
-			l.handler(req, res, next)
+			r.invokeWithParams(req, res, l, next)
 			return
 		}
 		// Stack exhausted.
@@ -208,6 +259,54 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 	}
 
 	next()
+}
+
+// invokeWithParams runs any pending app.Param callbacks for the matched layer's
+// parameters, then invokes the layer's handler. Each parameter's callbacks run
+// at most once per request.
+func (r *Router) invokeWithParams(req *Request, res *Response, l *layer, next Next) {
+	if len(r.paramCallbacks) == 0 {
+		l.handler(req, res, next)
+		return
+	}
+
+	type job struct {
+		value string
+		fn    ParamHandler
+	}
+	var jobs []job
+	for _, key := range l.pattern.keys {
+		if req.paramDone[key] {
+			continue
+		}
+		if fns := r.paramCallbacks[key]; len(fns) > 0 {
+			for _, fn := range fns {
+				jobs = append(jobs, job{value: req.params[key], fn: fn})
+			}
+			req.paramDone[key] = true
+		}
+	}
+	if len(jobs) == 0 {
+		l.handler(req, res, next)
+		return
+	}
+
+	idx := 0
+	var step Next
+	step = func(errs ...error) {
+		if len(errs) > 0 && errs[0] != nil {
+			next(errs[0])
+			return
+		}
+		if idx < len(jobs) {
+			j := jobs[idx]
+			idx++
+			j.fn(req, res, step, j.value)
+			return
+		}
+		l.handler(req, res, next)
+	}
+	step()
 }
 
 // ---- path pattern matching (a small path-to-regexp) -------------------------
@@ -222,53 +321,95 @@ type pathPattern struct {
 	rawPath string
 }
 
-var paramSegment = regexp.MustCompile(`:([A-Za-z_][A-Za-z0-9_]*)`)
+func isNameChar(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
 
+// compilePattern compiles an Express-style path into a regular expression plus
+// the ordered parameter names. Supported syntax:
+//
+//	:name          a required parameter ([^/]+)
+//	:name?         an optional parameter (the preceding "/" is optional too)
+//	:name(\d+)     a parameter constrained by a custom regular expression
+//	*              a wildcard captured as the "*" parameter
+//
+// A custom regex should not contain capturing groups (use (?:...)) — the
+// parameter itself is the capturing group.
 func compilePattern(path string, prefix bool) *pathPattern {
 	if path == "" {
 		path = "/"
 	}
 	p := &pathPattern{raw: path, prefix: prefix, rawPath: path}
 
-	// Escape regex metacharacters, then re-introduce our own tokens.
-	var b strings.Builder
-	b.WriteString("^")
-
-	segments := path
-	// Build regex by scanning for :params and * wildcards.
+	var frags []string
 	i := 0
-	for i < len(segments) {
-		c := segments[i]
-		switch {
-		case c == ':':
-			m := paramSegment.FindStringSubmatch(segments[i:])
-			if m != nil {
-				p.keys = append(p.keys, m[1])
-				b.WriteString(`([^/]+)`)
-				i += len(m[0])
+	for i < len(path) {
+		c := path[i]
+		switch c {
+		case ':':
+			// Parameter name.
+			j := i + 1
+			for j < len(path) && isNameChar(path[j]) {
+				j++
+			}
+			name := path[i+1 : j]
+			if name == "" {
+				frags = append(frags, regexp.QuoteMeta(":"))
+				i++
 				continue
 			}
-			b.WriteString(regexp.QuoteMeta(string(c)))
-			i++
-		case c == '*':
+			// Optional custom regex constraint in balanced parentheses.
+			pattern := `[^/]+`
+			if j < len(path) && path[j] == '(' {
+				depth, k := 1, j+1
+				for k < len(path) && depth > 0 {
+					switch path[k] {
+					case '(':
+						depth++
+					case ')':
+						depth--
+					}
+					k++
+				}
+				pattern = path[j+1 : k-1]
+				j = k
+			}
+			// Optional marker.
+			optional := false
+			if j < len(path) && path[j] == '?' {
+				optional = true
+				j++
+			}
+			group := "(" + pattern + ")"
+			if optional && len(frags) > 0 && frags[len(frags)-1] == "/" {
+				// Make the leading slash optional along with the parameter.
+				frags[len(frags)-1] = "(?:/" + group + ")?"
+			} else if optional {
+				frags = append(frags, group+"?")
+			} else {
+				frags = append(frags, group)
+			}
+			p.keys = append(p.keys, name)
+			i = j
+		case '*':
 			p.keys = append(p.keys, "*")
-			b.WriteString(`(.*)`)
+			frags = append(frags, "(.*)")
+			i++
+		case '/':
+			frags = append(frags, "/")
 			i++
 		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
+			frags = append(frags, regexp.QuoteMeta(string(c)))
 			i++
 		}
 	}
 
+	body := strings.Join(frags, "")
 	if prefix {
-		// Prefix match: allow an exact match or a match followed by "/...".
-		// Normalize a trailing slash so "/api" matches "/api" and "/api/x".
-		suffix := b.String()
-		suffix = strings.TrimSuffix(suffix, "/")
-		p.re = regexp.MustCompile(suffix + `(?:/.*)?$`)
+		body = strings.TrimSuffix(body, "/")
+		p.re = regexp.MustCompile("^" + body + `(?:/.*)?$`)
 	} else {
-		b.WriteString("/?$") // tolerate an optional trailing slash
-		p.re = regexp.MustCompile(b.String())
+		p.re = regexp.MustCompile("^" + body + "/?$")
 	}
 	return p
 }

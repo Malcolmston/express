@@ -25,15 +25,20 @@ type Request struct {
 	// ctx holds per-request values set by middleware (res.Locals equivalent
 	// for the request scope).
 	values map[string]any
+
+	// paramDone tracks which route parameters have had their app.Param
+	// callbacks run, so each runs at most once per request.
+	paramDone map[string]bool
 }
 
 func newRequest(r *http.Request, app *Application) *Request {
 	return &Request{
-		Raw:    r,
-		app:    app,
-		params: make(map[string]string),
-		path:   cleanPath(r.URL.Path),
-		values: make(map[string]any),
+		Raw:       r,
+		app:       app,
+		params:    make(map[string]string),
+		path:      cleanPath(r.URL.Path),
+		values:    make(map[string]any),
+		paramDone: make(map[string]bool),
 	}
 }
 

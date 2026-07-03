@@ -63,7 +63,26 @@ The `QUERY` method is the emerging IETF safe-with-body method; `app.Query`
 mirrors Express's `app.query()`.
 
 Route parameters are read with `req.Params("id")`. A `*` in a path is a
-wildcard captured as the `*` parameter.
+wildcard captured as the `*` parameter. Parameters can be **optional** (`:id?`)
+or constrained by a **regular expression** (`:id(\d+)`):
+
+```go
+app.Get("/users/:id?", handler)      // matches /users and /users/42
+app.Get(`/items/:id(\d+)`, handler)  // matches /items/42, not /items/abc
+```
+
+Register method handlers for one path with `app.Route`, and preprocess a
+parameter with `app.Param`:
+
+```go
+app.Route("/users").Get(list).Post(create)
+app.Param("id", func(req *express.Request, res *express.Response, next express.Next, id string) {
+	user, err := db.Find(id)
+	if err != nil { next(err); return }
+	req.Set("user", user)
+	next()
+})
+```
 
 ### Middleware
 
@@ -124,7 +143,34 @@ app.Use(func(err error, req *express.Request, res *express.Response, next expres
 | `res.Type(t)` | set Content-Type (`"json"`, `"html"`, ...) |
 | `res.Redirect(url)` / `res.Redirect(code, url)` | redirect |
 | `res.Cookie(name, value, opts)` | set a cookie |
+| `res.SendFile(path)` | send a file (Range + conditional GET support) |
+| `res.Download(path, name)` / `res.Attachment(name)` | send as a download |
+| `res.Render(view, data)` | render a template (see Views) |
+| `res.Format(map)` | content negotiation by Accept |
+| `res.ETag(tag)` / `res.LastModified(t)` / `res.NotModified()` | conditional GET |
 | `res.End()` | finish with no body |
+
+Request negotiation helpers: `req.Accepts(...)`, `req.AcceptsLanguages(...)`,
+`req.AcceptsCharsets(...)`, `req.AcceptsEncodings(...)`, `req.Ranges(size)`, and
+`req.Fresh(res)` / `req.Stale(res)`.
+
+## Views
+
+Register a template engine and render views with `res.Render`. The built-in
+engine uses `html/template` (for `.html` / `.tmpl`); plug in any engine with
+`app.Engine`.
+
+```go
+app.Set("views", "./views")     // template directory (default "views")
+app.Set("view engine", "html")  // default extension
+
+app.Get("/", func(req *express.Request, res *express.Response, next express.Next) {
+	res.Render("index", map[string]any{"Title": "Home"})
+})
+
+// Custom engine:
+app.Engine(".mustache", func(path string, data any) (string, error) { ... })
+```
 
 Most response methods return `*Response` so they can be chained:
 `res.Status(201).JSON(user)`.
