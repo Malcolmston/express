@@ -18,6 +18,8 @@ especially welcome.
    CI enforces all of these on Go 1.23 and 1.24.
 4. Preserve the **Node-mirroring API** (names and semantics are chosen to match
    the original library on purpose).
+5. New packages under the module must ship at least one test — this is enforced
+   by `TestEveryPackageShipsTests`.
 
 ## Reporting issues
 Open an issue with a minimal reproduction and the Go version you're using.
