@@ -1,0 +1,12 @@
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { Install } from '../../../src/components/Install';
+import { EXPRESS } from '../../../src/data';
+
+describe('Install', () => {
+  it('renders the install heading and the go get command', () => {
+    render(<Install lib={EXPRESS} />);
+    expect(screen.getByRole('heading', { name: 'Install' })).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`go get ${EXPRESS.pkg}`))).toBeInTheDocument();
+  });
+});
