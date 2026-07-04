@@ -229,7 +229,7 @@ func isCookieValue(s string) bool {
 func isFieldContent(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if c == 0x09 || (c >= 0x20 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF) {
+		if c == 0x09 || (c >= 0x20 && c <= 0x7E) || c >= 0x80 {
 			continue
 		}
 		return false

@@ -282,7 +282,8 @@ func TestIdentityConstant(t *testing.T) {
 		t.Error("Identity")
 	}
 	c := Constant("x")
-	if c() != "x" || c() != "x" {
+	v1, v2 := c(), c()
+	if v1 != "x" || v2 != "x" {
 		t.Error("Constant")
 	}
 }
@@ -317,7 +318,8 @@ func TestOnce(t *testing.T) {
 		calls++
 		return calls
 	})
-	if f() != 1 || f() != 1 || calls != 1 {
+	a, b := f(), f()
+	if a != 1 || b != 1 || calls != 1 {
 		t.Errorf("Once ran more than once: calls=%d", calls)
 	}
 }
