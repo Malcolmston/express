@@ -1,0 +1,99 @@
+// Package pbkdf2hash implements PBKDF2-HMAC-SHA256 key derivation and a
+// Django-style password hash encoding.
+package pbkdf2hash
+
+import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// DeriveKey derives a key of keyLen bytes from password and salt using
+// PBKDF2 with HMAC-SHA256 over the given number of iterations.
+func DeriveKey(password, salt []byte, iterations, keyLen int) []byte {
+	prf := hmac.New(sha256.New, password)
+	hLen := prf.Size()
+	numBlocks := (keyLen + hLen - 1) / hLen
+
+	dk := make([]byte, 0, numBlocks*hLen)
+	var block [4]byte
+	u := make([]byte, hLen)
+
+	for i := 1; i <= numBlocks; i++ {
+		block[0] = byte(i >> 24)
+		block[1] = byte(i >> 16)
+		block[2] = byte(i >> 8)
+		block[3] = byte(i)
+
+		prf.Reset()
+		prf.Write(salt)
+		prf.Write(block[:])
+		u = prf.Sum(u[:0])
+
+		t := make([]byte, hLen)
+		copy(t, u)
+
+		for n := 2; n <= iterations; n++ {
+			prf.Reset()
+			prf.Write(u)
+			u = prf.Sum(u[:0])
+			for j := range t {
+				t[j] ^= u[j]
+			}
+		}
+		dk = append(dk, t...)
+	}
+	return dk[:keyLen]
+}
+
+// Hash derives a 32-byte key from password with a random 16-byte salt and
+// returns an encoded string: pbkdf2_sha256$<iterations>$<hexsalt>$<hexkey>.
+func Hash(password string, iterations int) (string, error) {
+	if iterations <= 0 {
+		iterations = 100000
+	}
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	key := DeriveKey([]byte(password), salt, iterations, 32)
+	return fmt.Sprintf("pbkdf2_sha256$%d$%s$%s",
+		iterations, hex.EncodeToString(salt), hex.EncodeToString(key)), nil
+}
+
+// Verify parses an encoded hash, re-derives the key from password, and
+// compares in constant time.
+func Verify(password, encoded string) bool {
+	iterations, salt, key, err := parse(encoded)
+	if err != nil {
+		return false
+	}
+	derived := DeriveKey([]byte(password), salt, iterations, len(key))
+	return subtle.ConstantTimeCompare(derived, key) == 1
+}
+
+func parse(encoded string) (iterations int, salt, key []byte, err error) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 4 || parts[0] != "pbkdf2_sha256" {
+		return 0, nil, nil, errors.New("invalid encoded hash format")
+	}
+	iterations, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	salt, err = hex.DecodeString(parts[2])
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	key, err = hex.DecodeString(parts[3])
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return iterations, salt, key, nil
+}
