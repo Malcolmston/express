@@ -1,0 +1,14 @@
+{
+  "name": "@malcolmston/express",
+  "version": "0.1.0",
+  "description": "express utilities for Node.js (ms, bytes, uuid, slugify, validator, ...) — the Go implementation via WebAssembly.",
+  "type": "module",
+  "main": "./express.mjs",
+  "exports": { ".": "./express.mjs" },
+  "files": ["express.mjs", "express.wasm", "wasm_exec.js", "README.md"],
+  "scripts": { "build": "./build.sh", "test": "node test.mjs" },
+  "engines": { "node": ">=18" },
+  "keywords": ["express","ms","bytes","uuid","nanoid","slugify","validator","wasm","go"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/malcolmston/express", "directory": "wasm" }
+}
