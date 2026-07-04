@@ -43,16 +43,24 @@ func newRequest(r *http.Request, app *Application) *Request {
 }
 
 // withMountPath returns a shallow copy of the request whose routing path has
-// the matched mount prefix stripped and whose params include the mount's
-// captures. Body, values, and params map are shared with the parent.
-func (req *Request) withMountPath(prefixLen int, params map[string]string) *Request {
+// the matched mount prefix stripped. When inherit is true the copy shares the
+// parent's params (and adds the mount's captures) — Express's mergeParams;
+// otherwise it starts with a fresh, empty parameter set scoped to the
+// sub-router. Body and values are shared with the parent.
+func (req *Request) withMountPath(residual string, params map[string]string, inherit bool) *Request {
 	cp := *req
-	residual := req.path[prefixLen:]
 	if residual == "" || residual[0] != '/' {
 		residual = "/" + residual
 	}
 	cp.path = cleanPath(residual)
-	cp.mergeParams(params)
+
+	if inherit {
+		cp.mergeParams(params)
+	} else {
+		// Scope the sub-router to its own parameters.
+		cp.params = make(map[string]string)
+		cp.paramDone = make(map[string]bool)
+	}
 	return &cp
 }
 

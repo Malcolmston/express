@@ -106,6 +106,23 @@ api.Post("/users", createUser)
 app.Use("/api", api)   // routes become /api/users/:id, /api/users
 ```
 
+Routers accept options and can be mounted at a parameterized path; use
+`MergeParams` so the sub-router sees the parent's captured params:
+
+```go
+users := express.NewRouter(express.RouterOptions{
+	MergeParams:   true,  // inherit parent params (e.g. :userId)
+	CaseSensitive: false, // "/Foo" == "/foo" (default)
+	Strict:        false, // "/foo" == "/foo/" (default)
+})
+users.Get("/profile", func(req *express.Request, res *express.Response, next express.Next) {
+	res.Send("profile of " + req.Params("userId"))
+})
+app.Use("/users/:userId", users) // GET /users/42/profile -> "profile of 42"
+```
+
+Routers nest arbitrarily, each with its own middleware, params, and options.
+
 ### Error handling
 
 Register a four-argument error handler with `Use`; it runs only when an

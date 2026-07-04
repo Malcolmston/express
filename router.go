@@ -30,12 +30,27 @@ type layer struct {
 	mounted *Router
 }
 
+// RouterOptions configures a Router, mirroring Express's router options.
+type RouterOptions struct {
+	// CaseSensitive makes route matching case-sensitive ("/Foo" != "/foo").
+	// The default (false) matches case-insensitively, like Express.
+	CaseSensitive bool
+	// Strict enables strict routing, distinguishing "/foo" from "/foo/".
+	// The default (false) treats a trailing slash as optional.
+	Strict bool
+	// MergeParams makes a mounted sub-router inherit the parameters captured by
+	// its parent (e.g. a :userId in the mount path). The default (false) scopes
+	// each router to its own parameters.
+	MergeParams bool
+}
+
 // Router is an isolated instance of middleware and routes. Applications embed a
 // root Router, and additional routers can be created and mounted to compose
 // modular route handlers.
 type Router struct {
 	stack          []*layer
 	paramCallbacks map[string][]ParamHandler
+	opts           RouterOptions
 }
 
 // ParamHandler processes a captured route parameter before the route's handlers
@@ -88,9 +103,19 @@ func (rt *Route) Patch(h ...Handler) *Route { rt.router.Patch(rt.path, h...); re
 // All registers handlers for every method on the route.
 func (rt *Route) All(h ...Handler) *Route { rt.router.All(rt.path, h...); return rt }
 
-// NewRouter creates an empty Router.
-func NewRouter() *Router {
-	return &Router{}
+// NewRouter creates an empty Router with optional options.
+func NewRouter(opts ...RouterOptions) *Router {
+	r := &Router{}
+	if len(opts) > 0 {
+		r.opts = opts[0]
+	}
+	return r
+}
+
+// compile builds a path pattern honoring this router's case-sensitivity and
+// strict-routing options.
+func (r *Router) compile(path string, prefix bool) *pathPattern {
+	return compilePattern(path, prefix, r.opts.CaseSensitive, r.opts.Strict)
 }
 
 // method registers a handler chain for an HTTP method + path.
@@ -98,7 +123,7 @@ func (r *Router) method(m, path string, handlers []Handler) *Router {
 	for _, h := range handlers {
 		r.stack = append(r.stack, &layer{
 			method:  m,
-			pattern: compilePattern(path, false),
+			pattern: r.compile(path, false),
 			handler: h,
 		})
 	}
@@ -175,15 +200,15 @@ func (r *Router) Use(args ...any) *Router {
 	for _, a := range rest {
 		switch h := a.(type) {
 		case Handler:
-			r.stack = append(r.stack, &layer{pattern: compilePattern(path, true), handler: h})
+			r.stack = append(r.stack, &layer{pattern: r.compile(path, true), handler: h})
 		case func(*Request, *Response, Next):
-			r.stack = append(r.stack, &layer{pattern: compilePattern(path, true), handler: Handler(h)})
+			r.stack = append(r.stack, &layer{pattern: r.compile(path, true), handler: Handler(h)})
 		case ErrorHandler:
-			r.stack = append(r.stack, &layer{pattern: compilePattern(path, true), errh: h})
+			r.stack = append(r.stack, &layer{pattern: r.compile(path, true), errh: h})
 		case func(error, *Request, *Response, Next):
-			r.stack = append(r.stack, &layer{pattern: compilePattern(path, true), errh: ErrorHandler(h)})
+			r.stack = append(r.stack, &layer{pattern: r.compile(path, true), errh: ErrorHandler(h)})
 		case *Router:
-			r.stack = append(r.stack, &layer{pattern: compilePattern(path, true), mounted: h})
+			r.stack = append(r.stack, &layer{pattern: r.compile(path, true), mounted: h})
 		default:
 			panic("express: Use received an unsupported handler type")
 		}
@@ -217,14 +242,16 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 				continue
 			}
 
-			params, ok := l.pattern.match(basePath)
+			params, residual, ok := l.pattern.match(basePath)
 			if !ok {
 				continue
 			}
 
 			if l.mounted != nil {
-				// Mount a sub-router: strip the matched prefix and delegate.
-				sub := req.withMountPath(l.pattern.prefixLen(basePath), params)
+				// Mount a sub-router: hand it the unmatched remainder.
+				// With MergeParams the child inherits the parent's params
+				// (plus those captured by the mount); otherwise it starts fresh.
+				sub := req.withMountPath(residual, params, l.mounted.opts.MergeParams)
 				l.mounted.handle(sub, res, next)
 				return
 			}
@@ -319,6 +346,10 @@ type pathPattern struct {
 	keys    []string
 	prefix  bool // true for Use() layers: match the path or any sub-path
 	rawPath string
+	// residualIdx is the submatch index holding the unmatched remainder for a
+	// prefix pattern (used to compute a mounted sub-router's path). It is 0 for
+	// non-prefix patterns.
+	residualIdx int
 }
 
 func isNameChar(b byte) bool {
@@ -335,7 +366,7 @@ func isNameChar(b byte) bool {
 //
 // A custom regex should not contain capturing groups (use (?:...)) — the
 // parameter itself is the capturing group.
-func compilePattern(path string, prefix bool) *pathPattern {
+func compilePattern(path string, prefix, caseSensitive, strict bool) *pathPattern {
 	if path == "" {
 		path = "/"
 	}
@@ -405,20 +436,30 @@ func compilePattern(path string, prefix bool) *pathPattern {
 	}
 
 	body := strings.Join(frags, "")
+	flags := ""
+	if !caseSensitive {
+		flags = "(?i)"
+	}
 	if prefix {
 		body = strings.TrimSuffix(body, "/")
-		p.re = regexp.MustCompile("^" + body + `(?:/.*)?$`)
+		// Capture the unmatched remainder so a mounted sub-router receives the
+		// path with the whole matched prefix (including any :params) stripped.
+		p.re = regexp.MustCompile(flags + "^" + body + `(/.*|)$`)
+		p.residualIdx = len(p.keys) + 1 // groups: one per key, then the residual
+	} else if strict {
+		p.re = regexp.MustCompile(flags + "^" + body + "$")
 	} else {
-		p.re = regexp.MustCompile("^" + body + "/?$")
+		p.re = regexp.MustCompile(flags + "^" + body + "/?$")
 	}
 	return p
 }
 
-// match returns the captured params if path matches, plus whether it matched.
-func (p *pathPattern) match(path string) (map[string]string, bool) {
+// match returns the captured params, the unmatched remainder (for prefix
+// patterns), and whether the path matched.
+func (p *pathPattern) match(path string) (map[string]string, string, bool) {
 	m := p.re.FindStringSubmatch(path)
 	if m == nil {
-		return nil, false
+		return nil, "", false
 	}
 	params := make(map[string]string, len(p.keys))
 	for i, k := range p.keys {
@@ -426,23 +467,9 @@ func (p *pathPattern) match(path string) (map[string]string, bool) {
 			params[k] = m[i+1]
 		}
 	}
-	return params, true
-}
-
-// prefixLen returns the length of the matched prefix for a mounted router, used
-// to compute the residual path handed to the sub-router.
-func (p *pathPattern) prefixLen(path string) int {
-	// The static prefix is everything up to the first dynamic token.
-	raw := p.rawPath
-	if idx := strings.IndexAny(raw, ":*"); idx >= 0 {
-		raw = raw[:idx]
+	residual := ""
+	if p.prefix && p.residualIdx > 0 && p.residualIdx < len(m) {
+		residual = m[p.residualIdx]
 	}
-	raw = strings.TrimSuffix(raw, "/")
-	if raw == "" || raw == "/" {
-		return 0
-	}
-	if strings.HasPrefix(path, raw) {
-		return len(raw)
-	}
-	return 0
+	return params, residual, true
 }
