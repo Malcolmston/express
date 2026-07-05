@@ -34,6 +34,10 @@ type Application struct {
 	// viewEngines maps a file extension (".html", ".tmpl", ...) to the
 	// template engine used to render views for res.Render.
 	viewEngines map[string]EngineFunc
+
+	// viewCache memoises resolved view paths and (for the built-in engine)
+	// compiled templates when the "view cache" setting is enabled.
+	viewCache *viewCache
 }
 
 // New creates a new express Application.
@@ -43,15 +47,18 @@ func New() *Application {
 		settings:    make(map[string]any),
 		locals:      make(map[string]any),
 		viewEngines: make(map[string]EngineFunc),
+		viewCache:   newViewCache(),
 	}
 	// Sensible defaults mirroring Express.
 	app.settings["env"] = "development"
 	app.settings["x-powered-by"] = true
 	app.settings["views"] = "views"
 	app.settings["view engine"] = "html"
-	// Register the built-in html/template engine.
-	app.Engine(".html", htmlTemplateEngine)
-	app.Engine(".tmpl", htmlTemplateEngine)
+	// Express enables the view cache by default outside development.
+	app.settings["view cache"] = false
+	// Register the built-in html/template engine (cache-aware).
+	app.Engine(".html", app.htmlTemplateEngine)
+	app.Engine(".tmpl", app.htmlTemplateEngine)
 	return app
 }
 
