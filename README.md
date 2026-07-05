@@ -1,5 +1,12 @@
 # express
 
+[![CI](https://github.com/Malcolmston/express/actions/workflows/ci.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malcolmston/express.svg)](https://pkg.go.dev/github.com/malcolmston/express)
+[![Go Report Card](https://goreportcard.com/badge/github.com/malcolmston/express)](https://goreportcard.com/report/github.com/malcolmston/express)
+[![Release](https://img.shields.io/github/v/release/Malcolmston/express?sort=semver)](https://github.com/Malcolmston/express/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-pages-2f9bff)](https://malcolmston.github.io/express/)
+
 **Node's Express, for Go.**
 
 `express` is a fast, minimalist web framework for Go modeled after
