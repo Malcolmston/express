@@ -1,10 +1,19 @@
 # express
 
-[![CI](https://github.com/Malcolmston/express/actions/workflows/ci.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/ci.yml)
+[![Go Test](https://github.com/Malcolmston/express/actions/workflows/go-test.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/go-test.yml)
+[![Go Lint](https://github.com/Malcolmston/express/actions/workflows/go-lint.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/go-lint.yml)
+[![Go Vuln](https://github.com/Malcolmston/express/actions/workflows/go-vuln.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/go-vuln.yml)
+[![Web Unit](https://github.com/Malcolmston/express/actions/workflows/web-unit.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/web-unit.yml)
+[![Web E2E](https://github.com/Malcolmston/express/actions/workflows/web-e2e.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/web-e2e.yml)
+[![CodeQL](https://github.com/Malcolmston/express/actions/workflows/codeql.yml/badge.svg)](https://github.com/Malcolmston/express/actions/workflows/codeql.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/malcolmston/express.svg)](https://pkg.go.dev/github.com/malcolmston/express)
 [![Go Report Card](https://goreportcard.com/badge/github.com/malcolmston/express)](https://goreportcard.com/report/github.com/malcolmston/express)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Malcolmston/express)](go.mod)
 [![Release](https://img.shields.io/github/v/release/Malcolmston/express?sort=semver)](https://github.com/Malcolmston/express/releases)
+[![Last Commit](https://img.shields.io/github/last-commit/Malcolmston/express)](https://github.com/Malcolmston/express/commits)
+[![Code Size](https://img.shields.io/github/languages/code-size/Malcolmston/express)](https://github.com/Malcolmston/express)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Docs](https://img.shields.io/badge/docs-pages-2f9bff)](https://malcolmston.github.io/express/)
 
 **Node's Express, for Go.**
