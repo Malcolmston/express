@@ -1,3 +1,6 @@
+// Package cuid generates collision-resistant unique identifiers, a Go port of
+// the npm "cuid" package. Ids are monotonic, URL-safe, and safe to generate
+// across many hosts without coordination.
 package cuid
 
 import (

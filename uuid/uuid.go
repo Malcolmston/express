@@ -1,3 +1,5 @@
+// Package uuid generates and parses RFC 4122 UUIDs, supporting versions 3, 4,
+// and 5 along with the standard predefined namespaces.
 package uuid
 
 import (
@@ -7,11 +9,15 @@ import (
 	"errors"
 )
 
-// Predefined namespace UUIDs from RFC 4122.
+// Predefined namespace UUIDs from RFC 4122, used with V3 and V5.
 const (
-	NamespaceDNS  = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-	NamespaceURL  = "6ba7b811-9dad-11d1-80b4-00c04fd430c8"
-	NamespaceOID  = "6ba7b812-9dad-11d1-80b4-00c04fd430c8"
+	// NamespaceDNS is the namespace for fully-qualified domain names.
+	NamespaceDNS = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	// NamespaceURL is the namespace for URLs.
+	NamespaceURL = "6ba7b811-9dad-11d1-80b4-00c04fd430c8"
+	// NamespaceOID is the namespace for ISO OIDs.
+	NamespaceOID = "6ba7b812-9dad-11d1-80b4-00c04fd430c8"
+	// NamespaceX500 is the namespace for X.500 DNs.
 	NamespaceX500 = "6ba7b814-9dad-11d1-80b4-00c04fd430c8"
 )
 

@@ -15,8 +15,11 @@ import (
 
 // Default option values, matching the npm word-wrap defaults.
 const (
-	DefaultWidth   = 50
-	DefaultIndent  = "  "
+	// DefaultWidth is the default maximum line width in characters.
+	DefaultWidth = 50
+	// DefaultIndent is the default per-line indent prefix.
+	DefaultIndent = "  "
+	// DefaultNewline is the default line separator used in output.
 	DefaultNewline = "\n"
 )
 

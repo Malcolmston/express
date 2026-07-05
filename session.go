@@ -31,6 +31,7 @@ func NewMemorySessionStore() *MemorySessionStore {
 	return &MemorySessionStore{data: make(map[string]map[string]any)}
 }
 
+// Get returns a copy of the session data for id and whether it was present.
 func (m *MemorySessionStore) Get(id string) (map[string]any, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -45,6 +46,7 @@ func (m *MemorySessionStore) Get(id string) (map[string]any, bool) {
 	return cp, true
 }
 
+// Set stores a copy of data under id, overwriting any existing session.
 func (m *MemorySessionStore) Set(id string, data map[string]any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -55,6 +57,7 @@ func (m *MemorySessionStore) Set(id string, data map[string]any) {
 	m.data[id] = cp
 }
 
+// Destroy removes the session stored under id, if any.
 func (m *MemorySessionStore) Destroy(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

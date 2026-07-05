@@ -1,3 +1,5 @@
+// Package totp implements time-based one-time passwords as defined in RFC 6238,
+// the codes used by authenticator apps for two-factor authentication.
 package totp
 
 import (

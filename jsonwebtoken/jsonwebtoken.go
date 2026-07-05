@@ -1,3 +1,6 @@
+// Package jsonwebtoken signs and verifies JSON Web Tokens (JWTs) using HMAC
+// (HS256/HS384/HS512), a Go port of the npm "jsonwebtoken" package. It supports
+// the standard exp and nbf time claims.
 package jsonwebtoken
 
 import (
@@ -13,13 +16,18 @@ import (
 	"time"
 )
 
-// Typed errors.
+// Typed errors returned by Verify.
 var (
+	// ErrInvalidSignature is returned when the token signature does not match.
 	ErrInvalidSignature = errors.New("jsonwebtoken: invalid signature")
-	ErrTokenExpired     = errors.New("jsonwebtoken: token expired")
+	// ErrTokenExpired is returned when the token's exp claim is in the past.
+	ErrTokenExpired = errors.New("jsonwebtoken: token expired")
+	// ErrTokenNotValidYet is returned when the token's nbf claim is in the future.
 	ErrTokenNotValidYet = errors.New("jsonwebtoken: token not valid yet")
-	ErrInvalidToken     = errors.New("jsonwebtoken: invalid token")
-	ErrUnsupportedAlg   = errors.New("jsonwebtoken: unsupported algorithm")
+	// ErrInvalidToken is returned when the token is malformed.
+	ErrInvalidToken = errors.New("jsonwebtoken: invalid token")
+	// ErrUnsupportedAlg is returned when the token uses an unsupported algorithm.
+	ErrUnsupportedAlg = errors.New("jsonwebtoken: unsupported algorithm")
 )
 
 // timeNow is overridable in tests.

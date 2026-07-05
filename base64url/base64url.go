@@ -1,3 +1,5 @@
+// Package base64url encodes and decodes byte data using the RFC 4648 url-safe
+// base64 alphabet without padding, as used in JWTs and other web tokens.
 package base64url
 
 import (

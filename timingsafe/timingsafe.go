@@ -1,3 +1,5 @@
+// Package timingsafe compares byte slices and strings in constant time,
+// mirroring Node's crypto.timingSafeEqual to avoid timing side channels.
 package timingsafe
 
 import "crypto/subtle"

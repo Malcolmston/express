@@ -1,3 +1,5 @@
+// Package base32 encodes and decodes byte data using the RFC 4648 base32
+// alphabet, providing a small convenience wrapper over encoding/base32.
 package base32
 
 import (

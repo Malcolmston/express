@@ -1,3 +1,6 @@
+// Package ulid generates Universally Unique Lexicographically Sortable
+// Identifiers (ULIDs), a Go port of the npm "ulid" package. Ids embed a
+// millisecond timestamp and sort lexicographically by creation time.
 package ulid
 
 import (

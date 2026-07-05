@@ -1,3 +1,5 @@
+// Package xid generates globally unique, sortable 12-byte identifiers encoded as
+// 20-character base32 strings, a Go port of the "xid" scheme.
 package xid
 
 import (

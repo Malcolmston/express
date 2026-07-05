@@ -1,3 +1,5 @@
+// Package nanoid generates compact, URL-safe, cryptographically random
+// identifiers, a Go port of the npm "nanoid" package.
 package nanoid
 
 import (

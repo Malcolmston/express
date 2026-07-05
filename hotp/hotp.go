@@ -1,3 +1,5 @@
+// Package hotp implements HMAC-based one-time passwords as defined in RFC 4226,
+// used for counter-based two-factor authentication codes.
 package hotp
 
 import (

@@ -1,3 +1,6 @@
+// Package jwtdecode decodes the payload of a JSON Web Token without verifying
+// its signature, a Go port of the npm "jwt-decode" package. Never trust the
+// result for authorization; use jsonwebtoken to verify signed tokens.
 package jwtdecode
 
 import (

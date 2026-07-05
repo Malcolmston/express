@@ -13,11 +13,17 @@ import (
 
 // Unit magnitudes in bytes (binary).
 const (
-	B  int64 = 1
+	// B is one byte.
+	B int64 = 1
+	// KB is one kibibyte (1024 bytes).
 	KB int64 = 1 << 10
+	// MB is one mebibyte (1024 KB).
 	MB int64 = 1 << 20
+	// GB is one gibibyte (1024 MB).
 	GB int64 = 1 << 30
+	// TB is one tebibyte (1024 GB).
 	TB int64 = 1 << 40
+	// PB is one pebibyte (1024 TB).
 	PB int64 = 1 << 50
 )
 
