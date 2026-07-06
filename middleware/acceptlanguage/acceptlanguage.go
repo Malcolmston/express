@@ -1,6 +1,46 @@
 // Package acceptlanguage provides middleware that parses the Accept-Language
-// request header, optionally negotiates against a set of supported languages,
-// and stores the chosen language tag on the request under the key "language".
+// request header, optionally negotiates it against a set of supported
+// languages, and stores the chosen language tag on the request under the key
+// "language". It is the Go analogue of Node content-negotiation helpers such
+// as the accepts / negotiator packages and the accept-language module, exposed
+// as a drop-in express.Handler that resolves a single best language up front
+// so handlers need not reparse the header.
+//
+// Use this middleware whenever an application serves localized content and
+// needs to know which language the client prefers. Rather than scattering
+// header parsing and locale-matching logic across handlers, mount this once
+// and read the resolved tag from the request. It is well suited to
+// internationalized web pages, localized API messages, and any route that
+// selects templates, currency, or copy by language, giving every downstream
+// handler a consistent, already-negotiated answer.
+//
+// Operationally the middleware sits near the front of the chain, before any
+// handler that reads the language. On each request it reads the
+// Accept-Language request header via req.Get, computes the winning tag, stores
+// it with req.Set(Key, lang) where Key is "language", and always calls next().
+// It never writes a response or short-circuits, so it composes freely with
+// other middleware; retrieve the value downstream with req.Value(Key). Header
+// entries are parsed into tag/quality pairs and sorted by descending q-value,
+// with original order preserved for ties, matching the precedence rules of RFC
+// 7231 quality-value negotiation.
+//
+// Behavior depends on Options. When Supported is empty the middleware performs
+// no negotiation and simply stores the client's highest-quality tag verbatim
+// (or Default when the header is absent or empty). When Supported is non-empty
+// it walks the client's preferences in quality order and stores the first
+// supported tag that matches, where a match is exact, a wildcard "*", or a
+// shared primary subtag (so a client asking for "en-US" matches a supported
+// "en", case-insensitively). If no acceptable match is found, Options.Default
+// is stored. Entries with q=0 are discarded as explicitly unacceptable, and a
+// malformed q parameter falls back to the default quality of 1.0.
+//
+// Compared with the Node originals, this port keeps the essential q-value
+// ordering and primary-subtag fallback but is intentionally compact: it does
+// not implement the full BCP 47 lookup/filtering algorithm, does not weight or
+// score partial region matches beyond the primary subtag, and negotiates only
+// languages (not charset, encoding, or media types). It also differs from
+// Express's res.acceptsLanguages by resolving eagerly and stashing one winner
+// on the request instead of offering an on-demand negotiation call.
 package acceptlanguage
 
 import (

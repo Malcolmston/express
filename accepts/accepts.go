@@ -1,6 +1,56 @@
 // Package accepts performs HTTP content negotiation based on the Accept,
 // Accept-Language, Accept-Charset and Accept-Encoding request headers. It is a
-// port of the npm accepts package using only the Go standard library.
+// port of the npm accepts package (the higher-level wrapper around
+// negotiator that Express uses for req.accepts, req.acceptsLanguages,
+// req.acceptsCharsets and req.acceptsEncodings) built with only the Go
+// standard library.
+//
+// You reach for this package on the server side whenever a single endpoint can
+// respond in more than one representation and you want the client's stated
+// preferences to pick which one to send. Typical uses are choosing between
+// JSON and HTML for the same resource, selecting a UI language, agreeing on a
+// character set, or deciding whether to compress a response with gzip. Rather
+// than parsing the raw header strings yourself, you hand the request headers to
+// New and then ask, for each dimension, which of the representations you are
+// able to produce ("offers") the client prefers.
+//
+// Internally each Accept* header is split on commas into individual entries,
+// each entry is split on semicolons to separate the value from its parameters,
+// and any q= (case-insensitive) parameter is parsed as a floating-point quality
+// weight that defaults to 1.0 when absent or malformed. Media types are further
+// split into type/subtype, language tags into primary/sublanguage, and charsets
+// and encodings are treated as opaque tokens. Each offer you pass in is matched
+// against every parsed spec and scored by two axes: the quality value and a
+// specificity score (an exact type/subtype or primary-sub language match beats a
+// type/* or bare-primary match, which in turn beats a */* or * wildcard). The
+// results are then ordered by descending quality, then descending specificity,
+// then the original offer order, using a stable sort so ties preserve caller
+// order.
+//
+// Several edge cases are handled to mirror real content negotiation. An offer
+// whose effective quality is zero (for example a spec written as
+// application/json;q=0) is treated as unacceptable and dropped, so the singular
+// Type, Language, Charset and Encoding helpers return the empty string for it.
+// When no offers are supplied the plural methods return the acceptable header
+// values themselves in preference order. When the relevant header is absent the
+// package follows HTTP's "absence means anything is acceptable" rule and returns
+// the offers unchanged. Encoding is special: the identity (no-transform)
+// encoding is always considered acceptable unless it is explicitly disabled with
+// identity;q=0, and a *;q=0 wildcard can be used to forbid every encoding that
+// was not named. Media-type offers may be given either as full MIME types
+// ("application/json") or as short extension-style names ("json", "html",
+// "png"), which are expanded through a small built-in shorthand table.
+//
+// Compared with the Node original the public surface is intentionally close:
+// the plural methods correspond to accepts.types/languages/charsets/encodings
+// and the singular ones to their first-result convenience forms. The main
+// deliberate differences are idiomatic Go ones. Offers are passed as variadic
+// string arguments instead of an array, results come back as native []string
+// and string values, and the shorthand-to-MIME expansion is a fixed internal map
+// rather than the mime module's full extension database, so exotic extensions
+// fall back to application/<name>. The negotiation weighting, tie-breaking and
+// wildcard semantics are otherwise designed to match the behavior Express
+// developers expect from the npm package.
 package accepts
 
 import (

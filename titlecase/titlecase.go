@@ -1,9 +1,39 @@
-// Package titlecase converts strings to Title Case.
+// Package titlecase converts strings to Title Case, capitalizing the first
+// letter of each word. It is useful for normalizing headings, labels, names,
+// and other short display strings into a consistent, human-friendly form, for
+// example turning "hello world" or "helloWorld" into "Hello World".
 //
-// It is inspired by the npm title-case package from the change-case family:
-// the input is split into words on whitespace, punctuation, and camelCase
-// boundaries, and each resulting word has its first letter capitalized and the
-// remaining letters lowercased. Words are then rejoined with single spaces.
+// The package is inspired by the npm title-case package from the change-case
+// family. Like that library it treats the input as a sequence of words rather
+// than performing a naive character replacement: the string is first split into
+// words, each word is recased independently, and the words are rejoined. This
+// makes the behavior robust across the many separators and casing styles that
+// real-world identifiers and prose use.
+//
+// Word splitting happens in splitWords and recognizes three kinds of
+// boundaries. Runs of non-alphanumeric characters (whitespace, punctuation,
+// underscores, hyphens) separate words, so "foo_bar-baz" yields three words. A
+// lower-case or digit followed by an upper-case letter is a camelCase boundary,
+// so "helloWorld" splits into "hello" and "World". An upper-case letter
+// followed by an upper-case then lower-case letter is an acronym boundary, so
+// "XMLHttp" splits into "XML" and "Http". Unicode letters and digits are
+// recognized via the unicode package, so accented and non-ASCII words are
+// handled.
+//
+// Each word is then normalized by capitalize: the first rune is upper-cased and
+// every remaining rune is lower-cased. The recased words are joined with single
+// spaces regardless of the original separators, so mixed or repeated separators
+// collapse to one space. A consequence worth noting is that this package does
+// not implement small-word handling: unlike some English title-case styles that
+// leave short function words such as "a", "an", "of", or "the" in lower case,
+// every word here is capitalized, and acronyms are folded to initial-capital
+// form ("XML" becomes "Xml") because trailing letters are always lower-cased.
+//
+// Parity with the Node library is at the level of the split-and-recase model
+// and the common camelCase, PascalCase, and separator cases. The exact acronym
+// and small-word treatment of individual change-case releases is not
+// replicated, so callers who need a specific style guide's rules for short
+// words or preserved acronyms should post-process the result.
 package titlecase
 
 import (

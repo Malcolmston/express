@@ -1,8 +1,50 @@
 // Package csrf provides Cross-Site Request Forgery protection using the
-// double-submit-cookie pattern. A random token is issued in a cookie and, for
-// state-changing requests, must be echoed back in a request header or form
-// field. Requests whose submitted token does not match the cookie are rejected
-// with 403 Forbidden.
+// double-submit-cookie pattern. It is the Go analogue of the classic csurf
+// middleware from the Node ecosystem, packaged as a drop-in express.Handler. A
+// random token is issued in a cookie and, for state-changing requests, must be
+// echoed back in a request header or form field; requests whose submitted token
+// does not match the cookie are rejected with 403 Forbidden and never reach the
+// downstream handler.
+//
+// Use this middleware to defend endpoints that mutate server state — form posts,
+// account changes, deletions — against forged requests triggered by a malicious
+// third-party site while the victim is authenticated. The double-submit-cookie
+// scheme works because a foreign origin can cause the browser to send the
+// victim's cookies but cannot read them to reproduce the token in a header or
+// body, so a matching submission proves the request originated from your own
+// pages. Mount it with app.Use for a global guard, or attach it to the router
+// subtree that owns your state-changing routes.
+//
+// Operationally the middleware sits at the front of the chain. On every request
+// it looks for the token cookie (Options.CookieName, default "csrf"); if absent
+// it generates a fresh 32-byte token, base64url-encodes it, and issues it as a
+// Lax, non-HTTPOnly cookie so client scripts and templates can read it back. The
+// active token is stored on the request via req.Set and can be retrieved with
+// Token, which lets your GET handlers embed it in forms or expose it to
+// JavaScript. Safe methods (GET, HEAD, OPTIONS, TRACE) always call next() after
+// ensuring the cookie exists; only the unsafe methods POST, PUT, PATCH, and
+// DELETE are verified.
+//
+// For unsafe methods the middleware reads the submitted token from the
+// configured header (Options.Header, default "X-CSRF-Token") and, if that is
+// empty, from the form field (Options.FormField, default "_csrf"). It compares
+// the submission against the cookie value with crypto/subtle.ConstantTimeCompare
+// to avoid leaking timing information. If the submitted token is missing or does
+// not match, the request is short-circuited with a 403 Forbidden JSON body
+// ({"error":"invalid CSRF token"}) and next() is never invoked. Options.MaxAge
+// controls the cookie lifetime in seconds (0 yields a session cookie) and
+// Options.Secure marks the cookie HTTPS-only; the zero-value Options is usable
+// and applies all defaults.
+//
+// Compared with the Node csurf original, this port keeps the double-submit
+// contract — token in a cookie, echoed in a header or field, constant-time
+// compared, unsafe methods enforced — but is deliberately minimal. It does not
+// integrate with server-side sessions or offer csurf's signed-cookie or
+// session-backed token storage, does not expose a req.csrfToken() function
+// (use Token instead), and always sets HTTPOnly=false because the token must be
+// readable by the client to be resubmitted. Because the token is not tied to a
+// server-side secret, deploy it over TLS and rely on the SameSite=Lax cookie
+// attribute as defense in depth.
 package csrf
 
 import (

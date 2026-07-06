@@ -1,6 +1,22 @@
 // Package qs parses and serializes URL query strings with support for nested
 // objects and arrays via bracket notation. It is a Go port of a subset of the
-// npm module "qs".
+// npm module "qs", the query-string library Express uses when its extended
+// body/query parser is enabled.
+//
+// Where the standard library's net/url and this repository's querystringlite
+// treat a query string as a flat mapping of keys to values, qs understands the
+// bracket syntax that lets a single query string describe arbitrarily nested
+// structures. This is useful whenever an HTML form, an Express client, or an
+// AJAX request encodes an object or array into a URL, and the server needs to
+// reconstruct that shape rather than a flat list of strings.
+//
+// The bracket notation works by reading each key as a path. A plain key such as
+// "a" addresses a top-level scalar; "a[b]" nests a value under key "b" of the
+// object at "a"; "a[b][c]" nests one level deeper; and an empty bracket pair
+// "a[]" appends to an array. Parse walks these path segments and materializes
+// them as Go values: scalars are stored as strings, nested objects as
+// map[string]any, and repeated "[]" entries as []any, so the three canonical
+// forms below round-trip through the natural Go types.
 //
 // Supported forms:
 //
@@ -8,8 +24,22 @@
 //	a[b]=1&a[c]=2    -> {"a":{"b":"1","c":"2"}}
 //	a[]=1&a[]=2      -> {"a":["1","2"]}
 //
-// Keys and values are URL-decoded. Stringify is the inverse of Parse for the
-// documented cases and produces deterministic (key-sorted) output.
+// Keys and values are URL-decoded on parse and URL-encoded on stringify. A
+// leading "?" is ignored by Parse, empty pairs are skipped, and a key with no
+// "=" is treated as having an empty-string value. Stringify is the inverse of
+// Parse for the documented cases: nested maps become bracketed keys, slices
+// become repeated "[]" entries, and both the top-level keys and every nested
+// object's keys are emitted in sorted order so output is deterministic and
+// safe to compare in tests.
+//
+// This is intentionally a subset of the full npm qs surface. It focuses on the
+// nesting, array, and encoding behavior that Express relies on and does not
+// implement the entire option matrix of the original, such as configurable
+// array-index limits, custom delimiters, dotted-path notation, or charset
+// sentinels. The real qs enforces a default nesting depth of five bracket
+// levels to bound adversarial input; this port applies no such depth cap and
+// will follow bracket segments as deeply as the key string describes, so
+// callers that accept untrusted input should bound key length themselves.
 package qs
 
 import (

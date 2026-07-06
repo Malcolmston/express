@@ -1,8 +1,37 @@
-// Package filesize converts a number of bytes into a human readable string.
+// Package filesize converts a number of bytes into a human readable string,
+// a faithful port of the npm package "filesize".
 //
-// It is a faithful port of the npm package "filesize". By default it uses
-// base 10 (SI) units such as kB and MB. Base 2 rendering is available via the
-// Options, producing IEC units (KiB, MiB, ...) or JEDEC units (KB, MB, ...).
+// Reach for this package whenever a raw byte count needs to be shown to a
+// person: file managers, upload progress, download sizes, disk usage, and log
+// output all read better as "1.34 kB" than as "1337". FileSize covers the
+// common case with sensible defaults, while FileSizeOpts exposes the knobs
+// needed to match a particular convention.
+//
+// The rendering works by choosing an exponent e such that the value falls in
+// the range [1, base) when divided by base^e, then formatting that quotient.
+// The base is 1000 for SI/decimal units and 1024 for binary units. Because the
+// exponent is first estimated with a floating-point logarithm, the code then
+// nudges it up or down against exact powers of the divisor to correct for
+// rounding error at the unit boundaries, guaranteeing that a value like exactly
+// 1000 renders as "1 kB" rather than "1000 B".
+//
+// Three unit families are supported through the Standard option: "si" gives the
+// decimal units B, kB, MB, GB, ...; "iec" gives the binary units B, KiB, MiB,
+// GiB, ...; and "jedec" gives the hybrid B, KB, MB, GB, ... with 1024-based
+// magnitudes but SI-style spelling. When Standard is empty it is derived from
+// Base, so base 2 defaults to "iec" and base 10 defaults to "si". The number of
+// fractional digits is controlled by Round (default 2), and trailing zeros
+// together with a dangling decimal point are stripped, so "1.50" becomes "1.5"
+// and "1.00" becomes "1".
+//
+// Edge cases follow the Node original closely. A value of zero always renders as
+// "0 B" regardless of base or standard. Negative inputs are formatted by their
+// magnitude with a leading "-", e.g. "-1.34 kB". Values large enough to exceed
+// the last known unit (YB or YiB) are clamped to that final unit rather than
+// overflowing the table. The parity gap is that this port returns only the
+// formatted string: the npm library's ability to return an array or a rich
+// object, to force a fixed exponent, or to customize the symbol table and
+// separators is intentionally omitted in favour of a single string result.
 package filesize
 
 import (

@@ -1,7 +1,44 @@
-// Package snowflake is a standard-library implementation of the Twitter
-// Snowflake distributed ID scheme: a 63-bit id composed of a 41-bit
-// millisecond timestamp (relative to a custom epoch), a 10-bit node id and a
-// 12-bit per-millisecond sequence.
+// Package snowflake is a standard-library-only implementation of the Twitter
+// Snowflake distributed ID scheme, echoing the design of popular npm libraries
+// such as "snowflake-id" and the Go package bwmarrin/snowflake. It generates
+// 63-bit integer identifiers that are unique across many nodes, roughly ordered
+// by creation time, and cheap to produce at high throughput without any shared
+// state between machines beyond a distinct node id per generator.
+//
+// Each id is a 63-bit value (it fits in a signed int64 and stays non-negative)
+// partitioned into three fields. The high 41 bits hold a millisecond timestamp
+// measured relative to a custom epoch; the middle 10 bits hold the node id
+// (0..1023); and the low 12 bits hold a per-millisecond sequence (0..4095). The
+// custom Epoch constant is the Twitter epoch, 1288834974657 ms
+// (2010-11-04 01:42:54.657 UTC); subtracting it from the wall clock lets the
+// 41-bit timestamp field span about 69 years from that starting point rather
+// than from 1970.
+//
+// A Node bundles a node id with the small amount of mutable state needed to
+// assign sequence numbers, guarded by a mutex so a single Node is safe for
+// concurrent use. NewNode validates the node id against the 10-bit range and
+// returns an error if it is out of bounds. GenerateAt composes an id for an
+// explicit millisecond timestamp, and Generate is the convenience wrapper that
+// calls GenerateAt with time.Now().UnixMilli().
+//
+// Monotonicity is handled by the sequence field. When GenerateAt is called
+// repeatedly within the same millisecond, the sequence increments so each id is
+// distinct and strictly increasing; if the 12-bit sequence overflows (more than
+// 4096 ids in one millisecond), the generator advances its internal timestamp
+// by one millisecond and continues, effectively borrowing from the future to
+// preserve ordering. When the clock moves forward to a new millisecond the
+// sequence resets to zero. Because the timestamp occupies the most significant
+// bits, ids from a single node increase over time and are broadly sortable
+// across nodes, though ids minted in the same millisecond on different nodes are
+// ordered by node id rather than by true creation instant.
+//
+// The package-level helpers Timestamp, NodeOf, and Sequence decompose an id
+// back into its absolute Unix-millisecond time, node id, and sequence. Compared
+// with the reference JavaScript and Go implementations, the 41/10/12 bit layout,
+// the Twitter epoch, and the overflow-then-advance behaviour match; the main
+// differences are the idiomatic Go Node type with explicit GenerateAt for
+// deterministic testing and the plain int64 return type instead of a string or
+// BigInt wrapper.
 package snowflake
 
 import (

@@ -1,7 +1,40 @@
 // Package slugify converts strings into URL-safe slugs, mirroring the behavior
-// of the npm "slugify" library: accented Latin characters are transliterated to
-// ASCII, whitespace is collapsed to a separator, and disallowed characters are
-// removed.
+// of the npm "slugify" library. A slug is the lower-friction, path-safe form of
+// a title used in URLs, filenames, and anchor identifiers, for example turning
+// "Crème brûlée" into "creme-brulee". The goal is a deterministic, readable
+// ASCII string that survives copy-pasting and routing unchanged.
+//
+// The transformation runs in a few stages. First each input rune is looked up
+// in charMap, a transliteration table that maps common accented Latin letters
+// and a handful of symbols to ASCII equivalents (for example 'é' to "e", 'ß'
+// to "ss", and '&' to "and"). Runes without a mapping are passed through as-is.
+// After mapping, any character that is neither a word character nor whitespace
+// is removed, whitespace runs are collapsed into the separator, and consecutive
+// separators are merged so the result never contains a doubled separator.
+//
+// Behavior is tuned through Options. Separator sets the string that replaces
+// whitespace runs and defaults to "-". Lower lowercases the final slug; like
+// the npm library, slugify does not lowercase by default, so callers who want
+// lowercase slugs must ask for it. Strict removes every character that is not
+// alphanumeric or whitespace before separators are inserted, which drops
+// characters such as underscores that are otherwise treated as word
+// characters. Trim removes leading and trailing whitespace before the
+// separator join so the slug has no leading or trailing separator.
+//
+// The zero Options value is not identical to the convenience default. When
+// Slugify is called with no Options argument it enables Trim, matching what
+// most callers expect; when an explicit Options value is passed it is honored
+// verbatim except that an empty Separator falls back to "-". This mirrors the
+// npm defaults, where trimming is on but lowercasing is off, while still giving
+// full control to callers who construct Options directly.
+//
+// Parity with the Node library is close for the common Latin-1 and symbol
+// cases but not exhaustive. The character map here covers frequently used
+// accented letters, ligatures, and symbols rather than the full multi-hundred
+// entry table shipped by the npm package, so exotic scripts and less common
+// symbols may pass through or be removed instead of transliterated. The
+// separator collapsing, trimming, strict filtering, and optional lowercasing
+// follow the same rules as the reference implementation.
 package slugify
 
 import (

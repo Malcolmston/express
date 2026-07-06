@@ -1,11 +1,45 @@
 // Package htmlentities encodes and decodes HTML entities, providing a subset
-// of the behavior of the npm "html-entities" library.
+// of the behavior of the npm "html-entities" library. It exists so that Go code
+// ported from a Node codebase can keep calling a familiar encode/decode pair
+// when rendering user-supplied text into HTML or when reading entity-laden text
+// back out again, without pulling in a third-party dependency.
 //
-// Encode supports two modes: "specialChars" (the default) encodes only the
-// characters & < > " ' as named entities, and "nonAscii" additionally encodes
-// every non-ASCII rune (code point > 127) as a numeric entity. Decode
-// understands a table of common named entities as well as decimal (&#NNN;) and
-// hexadecimal (&#xHH;) numeric references.
+// Escaping HTML entities is the front line of defense against cross-site
+// scripting: turning the characters & < > " ' into their named forms prevents
+// user input from being interpreted as markup or from breaking out of an
+// attribute value. The npm html-entities library grew popular precisely because
+// it makes this safe by default while still allowing a stricter mode that also
+// escapes non-ASCII text for transports that are not UTF-8 clean. This port
+// keeps that same two-mode split and matches the library's output for the
+// characters and entities it supports.
+//
+// Encode supports two modes selected via EncodeOptions.Mode. The default,
+// "specialChars", encodes only the five characters & < > " ' as the named
+// entities &amp; &lt; &gt; &quot; and &apos;, leaving all other runes
+// (including non-ASCII text such as accented letters) untouched. The "nonAscii"
+// mode does everything specialChars does and additionally rewrites every rune
+// with a code point above 127 as a decimal numeric entity (for example é
+// becomes &#233;), which is useful when the output must be pure ASCII. Any
+// unrecognized Mode value falls back to specialChars behavior.
+//
+// Decode is the inverse and is intentionally more permissive than Encode. It
+// resolves the named entities in a built-in table (the five specials plus a
+// selection of common ones such as &copy;, &nbsp;, &mdash; and several typographic
+// and currency symbols) as well as decimal (&#233;) and hexadecimal (&#xe9; or
+// &#Xe9;) numeric references. A leading fast path returns the input unchanged
+// when it contains no ampersand. Anything that does not form a recognized entity
+// is left exactly as-is: a bare or trailing ampersand, an unknown name like
+// &unknownentity;, and malformed numerics like &#zz; all pass through untouched,
+// and the scanner only looks a bounded distance ahead for the terminating
+// semicolon so stray ampersands never swallow following text.
+//
+// Parity with the Node package is partial by design. The named-entity table is
+// a curated subset rather than the full HTML5 entity set, so Decode will leave
+// less common named entities unresolved, and Encode never emits named forms
+// beyond the five specials. Because Encode and Decode agree on those five
+// characters, specialChars-mode output round-trips exactly through Decode, which
+// is the common case for escaping and later unescaping application text.
+// DecodeOptions is accepted for API compatibility but currently has no effect.
 package htmlentities
 
 import (

@@ -1,9 +1,60 @@
-// Package str provides ports of the string utility functions found in the
-// JavaScript library lodash. All functions operate on plain Go strings and
-// depend only on the standard library.
+// Package str ports the "String" category of the npm lodash library to Go. It
+// provides the familiar lodash string helpers: the case converters (CamelCase,
+// KebabCase, SnakeCase, StartCase, LowerCase, UpperCase, Capitalize,
+// UpperFirst, LowerFirst), the word splitter Words, the padding and repeating
+// helpers (Pad, PadStart, PadEnd, Repeat), the trimming family (Trim,
+// TrimStart, TrimEnd), predicates (StartsWith, EndsWith), HTML entity handling
+// (Escape, Unescape), diacritic folding (Deburr), plus Truncate, Replace and a
+// JavaScript-style ParseInt. Every function operates on plain Go strings and
+// depends only on the standard library.
 //
-// Word splitting (see Words) is the foundation for the various case-conversion
-// helpers (CamelCase, KebabCase, SnakeCase, StartCase, LowerCase, UpperCase).
+// Use this package when you are porting front-end JavaScript that relied on
+// lodash string utilities, or whenever you want their concise, well-defined
+// behavior in Go: turning arbitrary identifiers or user input into a consistent
+// case (slugs, config keys, display labels), normalizing accented text for
+// search or comparison, padding and truncating strings for fixed-width output,
+// or escaping text for safe inclusion in HTML. The helpers are Unicode-aware
+// where it matters — lengths, slicing and padding are measured in runes rather
+// than bytes — so multi-byte input is handled the way lodash measures strings
+// by code point.
+//
+// The heart of the package is Words, and understanding it explains most of the
+// rest. Words scans the input rune by rune and emits maximal runs of letters or
+// digits, treating any non-alphanumeric rune as a separator; it also splits on
+// case boundaries so that camelCase, PascalCase, snake_case, kebab-case and
+// spaced text all decompose into the same word list. A run of upper-case
+// letters is kept together as an acronym, except that a trailing upper-case
+// letter immediately followed by a lower-case letter starts the next word, so
+// "XMLHttpTest" splits into "XML", "Http", "Test". The case converters are all
+// built on a shared compounder that first runs Deburr and strips apostrophes,
+// then splits with Words, then rejoins the words with a per-converter combiner
+// (CamelCase lower-cases each word and upper-cases the first letter of all but
+// the first; KebabCase and SnakeCase lower-case and join with "-" or "_";
+// StartCase upper-cases each word's first letter and joins with spaces).
+//
+// Edge cases follow lodash. Empty input yields an empty result from every
+// function, and the case converters collapse leading, trailing and repeated
+// separators (so "--foo-bar--" and "__FOO_BAR__" both reduce cleanly). The pad
+// helpers return the string unchanged when it already meets or exceeds the
+// requested length, default to a single space when the chars argument is empty,
+// and truncate the padding pattern to fit exactly. The trim helpers strip
+// Unicode whitespace by default, or exactly the set of runes in chars when one
+// is given. StartsWith and EndsWith interpret their position argument in runes,
+// with EndsWith treating a negative position as the end of the string. ParseInt
+// mirrors JavaScript's parseInt: it honours leading whitespace and a sign,
+// auto-detects a "0x" hex prefix when the radix is 0, and stops at the first
+// character that is not a valid digit for the radix (returning 0 when nothing
+// parses). Deburr covers the Latin-1 Supplement and the more common Latin
+// Extended-A letters and drops combining diacritical marks (U+0300..U+036F).
+//
+// Parity with Node's lodash is high for the covered functions, with a few
+// deliberate boundaries. Deburr's mapping table is a representative subset of
+// lodash's full Latin transliteration rather than an exhaustive copy, so exotic
+// code points may pass through unchanged. Escape and Unescape handle the same
+// five HTML characters lodash does (& < > " '); they are not general-purpose
+// HTML sanitizers. This package covers the pure string utilities and omits
+// lodash template compilation and the various pluralization/inflection helpers
+// that were never part of lodash's string category.
 package str
 
 import (
@@ -407,9 +458,17 @@ func Unescape(s string) string {
 // causes truncation to happen at the last separator match within the retained
 // text; SeparatorRegexp takes precedence over Separator when non-nil.
 type TruncateOptions struct {
-	Length          int
-	Omission        string
-	Separator       string
+	// Length is the maximum rune length of the result including Omission. A
+	// value <= 0 falls back to the lodash default of 30.
+	Length int
+	// Omission is the string appended to indicate truncation. An empty value
+	// falls back to "...".
+	Omission string
+	// Separator, when non-empty, causes truncation to occur at the last
+	// occurrence of this literal substring within the retained text.
+	Separator string
+	// SeparatorRegexp, when non-nil, causes truncation at the last match of the
+	// pattern within the retained text and takes precedence over Separator.
 	SeparatorRegexp *regexp.Regexp
 }
 

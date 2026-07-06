@@ -1,5 +1,38 @@
-// Package flatten provides faithful ports of lodash's `flatten`,
-// `flattenDeep`, and `flattenDepth`.
+// Package flatten provides faithful ports of lodash's flatten, flattenDeep,
+// and flattenDepth.
+//
+// The three functions collapse nested slices into a flatter slice. Use Flatten
+// to merge one level of nesting with full compile-time type safety, use
+// FlattenDeep to collapse an arbitrarily nested structure completely, and use
+// FlattenDepth when you need to control exactly how many levels to remove. They
+// are handy for normalizing grouped results, splicing together lists of lists,
+// or unwrapping data that arrived more deeply nested than the consumer wants.
+//
+// Flatten is generic over the element type and works on a [][]T, concatenating
+// every inner slice into a single []T in order; it is a pure, allocation-sized
+// pass with no reflection. FlattenDeep and FlattenDepth instead accept any and
+// use reflection so they can descend through mixed and heterogeneously typed
+// nesting, including []any, []int, arrays, and interface-wrapped slices. Any
+// element whose dynamic kind is a slice or array is descended into; every other
+// element is appended as a leaf. Interface values are unwrapped to their
+// concrete value before this test, so an []any holding a typed slice is still
+// flattened.
+//
+// FlattenDeep descends without limit. FlattenDepth takes an explicit depth:
+// depth 1 removes a single level, each larger depth removes one more, and a
+// depth of 0 or any negative value copies the top-level elements without
+// descending at all. A depth larger than the actual nesting simply flattens
+// everything, matching FlattenDeep.
+//
+// Several edge cases are handled deliberately. Strings are scalar leaves and are
+// never split into runes or bytes, so []any{"hi"} stays a single "hi". A nil,
+// empty, or non-slice input yields an empty but non-nil slice rather than nil,
+// which keeps reflect.DeepEqual comparisons and JSON output predictable.
+// Invalid or nil interface elements are appended as a literal nil. Compared to
+// lodash, these ports drop the iteratee/predicate variants (flatMap and
+// friends) and, because Go slices are homogeneous at the type level, expose the
+// deep and depth forms as any-based functions returning []any while keeping the
+// single-level Flatten fully typed.
 package flatten
 
 import "reflect"

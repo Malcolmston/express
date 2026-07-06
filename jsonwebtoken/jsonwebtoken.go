@@ -1,6 +1,53 @@
 // Package jsonwebtoken signs and verifies JSON Web Tokens (JWTs) using HMAC
-// (HS256/HS384/HS512), a Go port of the npm "jsonwebtoken" package. It supports
-// the standard exp and nbf time claims.
+// (HS256/HS384/HS512). It is a Go port of the widely used npm "jsonwebtoken"
+// package, covering the symmetric-key signing and verification path that most
+// applications reach for, implemented entirely with the standard library
+// (crypto/hmac, crypto/sha256, crypto/sha512, crypto/subtle and encoding/json).
+//
+// JWTs are the de facto token format for stateless authentication and for
+// passing signed claims between services: a server signs a small JSON payload
+// with a shared secret, hands the resulting string to a client, and can later
+// trust that string because tampering would invalidate the signature. This port
+// exists so Go programs can produce and check those tokens with the same mental
+// model as the Node library — Sign to mint a token, Verify to validate one, and
+// Decode to peek at the payload — without depending on a third-party module.
+//
+// A token is the three base64url segments header.payload.signature joined by
+// dots. Sign builds a header of {"alg","typ":"JWT"}, copies the caller's Claims
+// so the original map is never mutated, stamps an "iat" (issued-at) claim if one
+// is not already present, and derives "exp", "nbf", "iss" and "sub" from
+// SignOptions when those fields are set. The header and payload JSON are
+// base64url-encoded (raw, unpadded) and joined; that "signing input" is run
+// through HMAC with the SHA-256, SHA-384 or SHA-512 hash selected by the "alg"
+// option; and the resulting MAC is base64url-encoded as the third segment. The
+// default algorithm is HS256, so passing a nil *SignOptions signs an HS256 token
+// with only an iat claim.
+//
+// Verify reverses the process: it splits the token, decodes the header, looks up
+// the hash for the header's "alg", recomputes the expected signature over the
+// header and payload segments, and compares it against the presented signature
+// using crypto/subtle.ConstantTimeCompare so the check is not vulnerable to
+// timing attacks. Only after the signature matches are the standard time claims
+// enforced — a token whose "exp" is at or before the current time yields
+// ErrTokenExpired, and a token whose "nbf" is still in the future yields
+// ErrTokenNotValidYet. The clock is read through an overridable package-level
+// timeNow, which the internal tests replace to exercise expiry deterministically.
+// Malformed input (not exactly three segments, undecodable base64url, or invalid
+// JSON) yields ErrInvalidToken, an unrecognised algorithm yields
+// ErrUnsupportedAlg, and a wrong secret or altered token yields
+// ErrInvalidSignature; all of these are exported sentinel errors suitable for
+// errors.Is checks.
+//
+// Decode is the deliberately unauthenticated escape hatch: it returns the
+// payload Claims WITHOUT verifying the signature or the time claims, mirroring
+// the fact that a JWT payload is merely encoded, not encrypted. It is convenient
+// for inspecting a token you have not yet validated, but its result must never
+// be trusted for authorization — use Verify for that. Relative to Node, this
+// port implements the HMAC family (HS256/HS384/HS512) and the exp, nbf, iss and
+// sub registered claims; it does not implement RSA or ECDSA algorithms, the
+// "none" algorithm, audience/issuer assertion during verification, clock-skew
+// tolerance, or the full options surface of the original library, so callers
+// needing those must layer them on top.
 package jsonwebtoken
 
 import (
@@ -36,13 +83,22 @@ var timeNow = time.Now
 // Claims represents the JWT payload.
 type Claims map[string]interface{}
 
-// SignOptions configures signing.
+// SignOptions configures signing. The zero value signs an HS256 token with only
+// an iat (issued-at) claim.
 type SignOptions struct {
-	Alg       string
+	// Alg selects the HMAC algorithm: "HS256", "HS384" or "HS512". When empty
+	// it defaults to "HS256"; any other value makes Sign return ErrUnsupportedAlg.
+	Alg string
+	// ExpiresIn, when greater than zero, sets an "exp" claim to the signing time
+	// plus this duration. Zero omits the claim so the token never expires.
 	ExpiresIn time.Duration
+	// NotBefore, when greater than zero, sets an "nbf" claim to the signing time
+	// plus this duration, making the token invalid until then. Zero omits it.
 	NotBefore time.Duration
-	Issuer    string
-	Subject   string
+	// Issuer, when non-empty, sets the "iss" claim.
+	Issuer string
+	// Subject, when non-empty, sets the "sub" claim.
+	Subject string
 }
 
 func hasherFor(alg string) (func() hash.Hash, error) {

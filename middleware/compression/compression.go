@@ -1,5 +1,50 @@
 // Package compression provides express middleware that gzip-compresses
-// responses for clients that advertise gzip support via Accept-Encoding.
+// response bodies for clients that advertise gzip support via the
+// Accept-Encoding request header. It is the Go analogue of the Node
+// compression middleware (expressjs/compression), packaged as a drop-in
+// express.Handler, and it trades a small amount of CPU for a large reduction
+// in bytes on the wire for compressible payloads such as HTML, JSON, CSS, and
+// JavaScript.
+//
+// Use this middleware when you serve text-based responses to bandwidth-limited
+// or latency-sensitive clients and want smaller transfers without touching
+// your handlers. Mount it once near the top of the chain with app.Use so that
+// it wraps every downstream response, or attach it to a specific router or
+// path prefix to compress only part of the tree. Because it buffers the body
+// to make a size-based decision, it is best suited to ordinary buffered
+// responses rather than long-lived streams; place any handler that needs raw,
+// unbuffered access to the response writer ahead of it.
+//
+// Operationally the middleware runs early but does its real work after the
+// downstream handler returns. On each request it first inspects
+// Accept-Encoding: if the client does not list gzip it calls next() and leaves
+// the response completely untouched. Otherwise it swaps res.Writer for an
+// internal capturing writer, calls next() so the handler writes as usual, and
+// then restores the original writer. The captured status code and body are
+// then examined to decide whether compression is worthwhile. When it does
+// compress, it sets Content-Encoding: gzip, adds Vary: Accept-Encoding so
+// caches key on the negotiated encoding, deletes the now-incorrect
+// Content-Length, writes the captured status, and streams the gzipped bytes to
+// the original writer.
+//
+// Several conditions short-circuit compression and cause the buffered body to
+// be written through verbatim: a body smaller than MinLength (default
+// DefaultMinLength, 256 bytes), or a response that already carries a
+// Content-Encoding header (for example an image or a pre-compressed asset).
+// The compression Level defaults to gzip.DefaultCompression and may be set to
+// any value from gzip.BestSpeed to gzip.BestCompression; an invalid level that
+// causes gzip.NewWriterLevel to fail results in the uncompressed body being
+// written as a safe fallback. Because the body is buffered in memory before
+// being flushed, very large responses hold their full size in memory for the
+// duration of the request.
+//
+// Compared with the Node original, this port keeps the same negotiate,
+// buffer, and conditionally-encode model and the same Vary and Content-Length
+// handling, but is deliberately narrower in scope. It supports only gzip (not
+// deflate or brotli), it does not consult a per-Content-Type filter function
+// to decide compressibility, and it does not expose a streaming flush hook;
+// the decision to compress rests solely on Accept-Encoding, the body length,
+// and any existing Content-Encoding.
 package compression
 
 import (

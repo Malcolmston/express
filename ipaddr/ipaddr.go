@@ -1,6 +1,49 @@
 // Package ipaddr provides parsing and classification of IPv4 and IPv6
 // addresses. It is a small Go port of a subset of the JavaScript "ipaddr.js"
-// library, built on top of the standard library net package.
+// library, built entirely on top of the standard library net package so that no
+// third-party dependency is required.
+//
+// The ipaddr.js module is widely used in the Node ecosystem (notably by Express
+// and proxy middleware) to answer questions such as "is this a valid address?",
+// "which family is it?", "does it fall inside this CIDR block?" and "what kind
+// of address is it — loopback, private, multicast, public unicast?". This port
+// exists to answer the same questions in Go programs that need to reason about
+// client addresses, trust proxies, or filter traffic, while keeping the small,
+// object-oriented feel of the original API: Parse yields an *Address value whose
+// methods (Kind, String, Match, Range) mirror the JavaScript instance methods.
+//
+// Parsing delegates to net.ParseIP after trimming surrounding whitespace, so any
+// textual form the standard library accepts is accepted here. The address family
+// is decided by inspecting the parsed value: an address that has a 4-byte
+// representation and whose input text contains no colon is classified as "ipv4",
+// and everything else as "ipv6". That colon check is deliberate — it keeps
+// IPv4-mapped IPv6 literals such as "::ffff:1.2.3.4" on the IPv6 side rather than
+// silently narrowing them, and the original input string is retained so that
+// String reflects the family the caller actually wrote. Match parses a CIDR with
+// net.ParseCIDR and reports whether the address is contained in that network,
+// which works uniformly for both IPv4 and IPv6 ranges.
+//
+// Range classifies an address into a category name closely following
+// ipaddr.js's special-range tables. For IPv4 the categories are "unspecified",
+// "broadcast", "multicast", "linkLocal", "loopback", "private", "reserved" and
+// "unicast", where "unicast" is the fallthrough for ordinary public addresses.
+// For IPv6 the categories are "unspecified", "loopback", "multicast",
+// "linkLocal", "uniqueLocal", "ipv4Mapped" and "unicast". The checks are applied
+// in order and the first match wins, so, for example, the all-zeros address is
+// reported as "unspecified" before the more general unicast fallthrough is
+// reached.
+//
+// Edge cases are handled explicitly. Parse returns an error for empty input and
+// for anything net.ParseIP rejects (for example "999.999.999.999" or a bare
+// "192.168.1"); IsValid is a thin boolean wrapper over Parse for callers that
+// only need a yes/no answer. Match returns a non-nil error when the CIDR string
+// is malformed rather than reporting a false negative. Compared with Node, this
+// port intentionally covers only address parsing, validity, family detection,
+// CIDR containment and range classification; it does not implement ipaddr.js
+// features such as address arithmetic, subnet-mask/prefix conversion, the
+// fromByteArray constructors, or the full set of narrowly scoped reserved
+// sub-ranges, and its "unicast" bucket therefore absorbs a few blocks that
+// ipaddr.js would name individually.
 package ipaddr
 
 import (

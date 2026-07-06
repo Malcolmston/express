@@ -1,14 +1,57 @@
-// Package object ports a collection of lodash object utility functions to Go.
+// Package object ports the "Object" category of the npm lodash library to Go,
+// providing the map- and structure-oriented helpers such as Keys, Values,
+// Entries, Pick, Omit, MapKeys, MapValues, Invert, Assign, Merge, Defaults,
+// Get, Set, Has, Unset, Update, Clone, CloneDeep, IsEqual and Transform. In
+// JavaScript these operate on plain objects; here they operate on Go maps and,
+// for the dynamically-typed path and merge helpers, on the any-typed tree of
+// map[string]any and []any values that a decoded JSON document produces. The
+// package depends only on the Go standard library.
 //
-// The package operates primarily on map[string]any values (mirroring lodash's
-// plain objects) and []any slices (mirroring lodash arrays). Where it reads
-// cleanly, functions are written generically over arbitrary key/value types.
+// Reach for this package when you are manipulating decoded JSON or other
+// loosely-typed nested data and want the ergonomic, batteries-included
+// vocabulary that lodash offers on the front end: extracting a subset of keys,
+// re-keying or re-mapping values, deeply merging configuration layers, reading
+// or writing a value several levels down by a single "a.b.c" path, or comparing
+// two trees for structural equality. The statically-typed helpers (Keys,
+// Values, Entries, Pick, Omit, MapKeys, MapValues, Invert, FindKey and friends)
+// are written with Go generics so they work over any comparable key type and
+// any value type without reflection or boxing.
 //
-// Path-based helpers (Get, Set, Has, Unset, Update) accept dot-notation paths
-// such as "a.b.c". Numeric path segments index into []any slices, so "a.0.b"
-// walks into the first element of the slice stored at key "a".
+// The functions divide into two families by how they are typed. The collection
+// helpers are generic over [K comparable, V any] and simply iterate the map to
+// build a fresh result; Pick copies only the requested keys that are present,
+// Omit copies everything except a drop-set of keys, and the *By variants take a
+// predicate or iteratee instead of an explicit key list. The dynamic helpers
+// operate on any: Get, Set, Has, Unset and Update accept dot-notation paths
+// such as "a.b.c", splitting on "." and walking the tree one segment at a time.
+// A numeric segment indexes into a []any slice, so the path "a.0.b" descends
+// into the first element of the slice stored under key "a"; Set creates the
+// intermediate map or slice containers on demand (choosing a slice when the
+// next segment is numeric) and grows slices with nil padding as needed.
 //
-// The package depends only on the Go standard library.
+// Edge-case semantics follow lodash closely. Get returns the supplied
+// defaultValue (or nil) whenever any segment along the path is missing, out of
+// range, or the resolved value is itself nil. Defaults and DefaultsDeep only
+// fill keys that are absent or hold nil, never overwriting an existing
+// non-nil value, and DefaultsDeep recurses into nested maps while deep-cloning
+// the values it copies in. Merge recursively merges nested maps key by key and
+// nested slices index by index, skipping nil source values, whereas Assign is a
+// shallow overwrite. CloneDeep recursively copies map and slice containers so
+// that later mutation cannot reach the original, and IsEqual compares trees
+// structurally, guarding against panics from uncomparable scalar types by
+// treating them as unequal. Passing a nil destination to the mutating helpers
+// (Assign, Merge, Defaults, DefaultsDeep, Transform) allocates a fresh map.
+//
+// Parity with Node's lodash is close in behavior but adapted to Go's type
+// system and runtime. The most visible difference is ordering: Go map iteration
+// is randomized, so Keys, Values, Entries, MapKeys and the For* iterators do
+// not preserve insertion order the way lodash does, and functions whose result
+// would otherwise be order-dependent take deliberate steps to stay
+// deterministic (FindKey examines keys in sorted order). There is no notion of
+// JavaScript "undefined" versus a present-but-null value, so nil stands in for
+// both; Unset deletes a map key but, matching lodash's array delete, only nils
+// out a slice element rather than shifting the slice. Symbol keys, prototype
+// chains, getters and lodash's customizer callbacks have no equivalent here.
 package object
 
 import (
@@ -39,7 +82,9 @@ func Values[K comparable, V any](m map[K]V) []V {
 
 // Pair is a single key/value entry, as produced by Entries.
 type Pair[K comparable, V any] struct {
-	Key   K
+	// Key is the map key of the entry.
+	Key K
+	// Value is the map value associated with Key.
 	Value V
 }
 

@@ -1,11 +1,50 @@
 // Package throttle provides a per-client token-bucket rate limiter for the
-// express framework. Each client (keyed by IP by default) has a bucket that
-// refills at a fixed rate up to a burst capacity. A request consumes one token;
-// when no token is available the request is rejected with 429 Too Many
-// Requests.
+// express framework. It is the Go analogue of Node rate-limiting middleware
+// such as express-rate-limit, express-throttle, or the token-bucket limiters
+// built on top of the "limiter" npm module, packaged as a drop-in
+// express.Handler. Each client (keyed by IP by default) is given its own
+// bucket that refills at a fixed Rate up to a Burst capacity; each request
+// consumes one token, and when no token is available the request is rejected
+// with 429 Too Many Requests plus a Retry-After header.
 //
-// Refilling is computed from elapsed wall-clock time via an injectable Now
-// function, making the behaviour fully deterministic in tests.
+// Reach for this middleware when you want to protect an endpoint from abuse or
+// accidental flooding: login and password-reset routes, expensive search or
+// report endpoints, public APIs that must enforce a fair-use quota, or any
+// handler whose cost you want to spread out over time. The token-bucket model
+// allows short bursts (up to Burst requests back-to-back) while still capping
+// the sustained request rate at Rate requests per second, which is friendlier
+// to legitimate clients than a hard fixed-window counter.
+//
+// Operationally the middleware belongs near the front of the chain, before the
+// handlers whose work you want to protect. On each request it derives a bucket
+// key with Options.KeyFunc (defaulting to req.IP()), refills that key's bucket
+// based on the wall-clock time elapsed since its last request, and then tries
+// to spend one token. When a token is available it is deducted and next() is
+// called so the request proceeds normally; the middleware writes nothing to
+// the response in the success path. Buckets are held in an in-memory map
+// guarded by a sync.Mutex, created lazily on first sighting of a key and
+// seeded full at Burst tokens, so a brand-new client always gets its full
+// burst allowance immediately.
+//
+// When the bucket is empty the request is short-circuited: the middleware
+// computes the whole number of seconds until one token will have refilled,
+// sets Retry-After to that value (never less than 1), and replies with
+// res.Status(429).Send("Too Many Requests") without calling next(). Rate and
+// Burst both coerce non-positive values to 1, so an empty Options{} yields a
+// strict one-request-per-second limiter. Refill is computed from an injectable
+// Options.Now clock (defaulting to time.Now), which is what makes the tests
+// deterministic; callers can supply the same hook to reason about limits under
+// a controlled clock.
+//
+// Compared with the Node originals this port is deliberately minimal and
+// process-local. The bucket map lives in the memory of a single process and is
+// never evicted, so it is unsuitable as-is for a multi-instance deployment
+// (where you would back the counters with Redis or similar) and a long-lived
+// server with an unbounded key space will accumulate buckets over time. It
+// emits only Retry-After -- not the X-RateLimit-Limit / X-RateLimit-Remaining
+// family some middleware adds -- does not distinguish routes, and offers no
+// allow-list or custom rejection handler; the response body is always the
+// fixed "Too Many Requests" string.
 package throttle
 
 import (

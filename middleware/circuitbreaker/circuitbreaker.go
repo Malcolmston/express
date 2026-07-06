@@ -4,10 +4,51 @@
 // responses occur, the circuit "opens" and subsequent requests are
 // short-circuited with a 503 response without invoking the downstream chain.
 // After a cooldown period elapses the circuit moves to a half-open state,
-// allowing a single trial request whose outcome closes or re-opens it.
+// allowing a single trial request whose outcome closes or re-opens it. It is
+// the express framework's Go analogue of Node resiliency middleware such as
+// opossum and express-circuit-breaker.
 //
-// The clock is injectable via Options.Now, so the time-based behaviour is fully
-// deterministic in tests.
+// Use this middleware to stop a failing dependency from taking the rest of the
+// service down with it. When a route proxies to a database, a third-party API,
+// or another microservice that has started returning errors, hammering it with
+// more requests only deepens the outage and ties up goroutines waiting on
+// timeouts. Opening the circuit sheds that load instantly, returns a fast 503
+// to callers instead of a slow failure, and gives the downstream dependency
+// room to recover. Mount it around the specific routes whose failures you want
+// to isolate rather than globally, since one breaker tracks one failure stream.
+//
+// Operationally the breaker wraps the downstream chain. Before each request it
+// consults its state: while closed (and while half-open trials are permitted)
+// it installs a statusWriter over res.Writer, calls next(), restores the
+// original writer, and records the first status code the handler wrote. A
+// status of 500 or greater counts as a failure and increments a counter; any
+// status below 500 is treated as success and immediately resets the counter
+// and closes the circuit. Once the consecutive-failure counter reaches the
+// threshold the circuit opens and stamps the current time. The breaker is
+// guarded by a mutex, so a single instance may be shared safely across
+// concurrent requests.
+//
+// While the circuit is open the middleware short-circuits: it responds with 503
+// Service Unavailable carrying Options.Message and never calls next(), so the
+// ailing dependency sees no traffic. When at least Cooldown has elapsed since
+// the circuit opened, the next request transitions the breaker to half-open and
+// is allowed through as a single trial. If that trial succeeds the circuit
+// closes and normal traffic resumes; if it fails the circuit re-opens
+// immediately and the cooldown clock restarts. Note that the failure signal is
+// the HTTP status code the handler writes — a handler that recovers from a
+// panic into a 500, or explicitly sends a 5xx, trips the breaker, whereas a
+// handler that never writes a status is recorded as 200 OK.
+//
+// Configuration lives in Options. Threshold is the number of consecutive 5xx
+// responses that trips the breaker and defaults to 5 when set to zero or less;
+// Cooldown is how long the circuit stays open before permitting a trial and
+// defaults to 30 seconds; Message is the 503 body and defaults to "Service
+// Unavailable"; and Now supplies the clock, defaulting to time.Now but
+// overridable so time-based behaviour is fully deterministic in tests. Compared
+// with richer Node libraries this port is intentionally minimal: it keys solely
+// off response status rather than latency, timeouts, or thrown errors, exposes
+// no rolling window, fallback function, or per-breaker metrics and events, and
+// admits exactly one trial request per cooldown in the half-open state.
 package circuitbreaker
 
 import (

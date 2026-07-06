@@ -1,11 +1,47 @@
-// Package throttle provides a faithful port of lodash's throttle.
+// Package throttle rate-limits how often a function may run, invoking it at
+// most once per a fixed wait duration. It is a stdlib-only Go port of lodash's
+// throttle (https://lodash.com/docs/#throttle), matching that function's
+// leading/trailing edge behavior along with its cancel and flush controls; the
+// same leading/trailing model is shared by the npm "throttle-debounce" package.
+// Throttling is used to tame high-frequency events — scroll and resize
+// handlers, keystrokes, progress callbacks, log flushing — so expensive work
+// runs at a bounded rate instead of on every event.
 //
-// A throttled function invokes the wrapped function at most once per every
-// wait duration. It supports leading and trailing invocation, cancellation,
-// and immediate flushing.
+// A Throttler is created with New(wait, fn, opts...). Calling its Call method
+// stands in for "the event fired"; the Throttler decides whether to run fn now,
+// schedule it for the end of the current window, or ignore it because fn already
+// ran recently. Regardless of how many times Call is invoked inside one wait
+// window, fn runs at most once for the leading edge and at most once for the
+// trailing edge of that window. This is distinct from debouncing, which resets
+// its timer on every call and only fires after activity stops; a throttle
+// guarantees steady progress during a sustained burst.
 //
-// The clock is injectable via WithClock so that tests can advance time
-// manually instead of relying on real timers.
+// Leading and trailing behavior is configurable and both default to enabled,
+// exactly as in lodash. With leading enabled, the first Call in an idle period
+// invokes fn immediately. With trailing enabled, if one or more further Calls
+// arrive during the wait window, fn is invoked once more when the window
+// elapses, so the most recent activity is not lost. Disabling leading via
+// WithLeading(false) delays the first invocation to the trailing edge;
+// disabling trailing via WithTrailing(false) drops the follow-up call. If both
+// are disabled fn never runs. When calls are spaced farther apart than wait,
+// each one is treated as a fresh leading edge and invokes fn immediately.
+//
+// Cancel discards any pending trailing invocation and resets the Throttler to
+// an idle state, so the next Call is again treated as a leading edge. Flush
+// immediately invokes a pending trailing call (if trailing is enabled and one is
+// scheduled) rather than waiting for the timer, and then clears the pending
+// state so no double invocation occurs. Pending reports whether a timer is
+// currently scheduled. These three methods mirror lodash's cancel, flush, and
+// pending helpers.
+//
+// The clock is injectable via WithClock, which supplies a Clock implementation
+// providing Now and AfterFunc plus a Timer with Stop. The default clock uses
+// time.Now and time.AfterFunc, so real timers fire fn on their own goroutines;
+// a fake clock can be advanced manually to make tests and examples fully
+// deterministic without sleeping. A Throttler serializes its own state with an
+// internal mutex, so Call, Cancel, Flush, and Pending are safe to invoke from
+// multiple goroutines; the wrapped fn must itself be safe for the concurrency
+// it may see.
 package throttle
 
 import (

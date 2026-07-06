@@ -1,9 +1,46 @@
 // Package humanizeduration converts a duration in milliseconds into a human
-// readable phrase such as "1 hour" or "1 minute, 1 second".
+// readable phrase such as "1 hour" or "1 minute, 1 second". It is a faithful
+// port of the npm package "humanize-duration" (English only), reproducing that
+// library's default behaviour and the handful of options most commonly reached
+// for when formatting durations for end users.
 //
-// It is a faithful port of the npm package "humanize-duration" (English only).
-// The standard unit lengths are used: a year is 365.25 days, a month is
-// 30.4375 days and a week is 7 days.
+// The original JavaScript module exists because raw millisecond counts are
+// unfriendly to read: "3661000" means little at a glance, whereas "1 hour, 1
+// minute, 1 second" is immediately understood. This port is intended for the
+// same job in Go programs, for example rendering an elapsed time, a countdown,
+// or a cache TTL in a log line, a CLI, or an HTTP response without pulling in a
+// third-party dependency. Only the standard library is used.
+//
+// Formatting works by decomposing the input into an ordered set of units. Each
+// unit has a fixed length in milliseconds: a year is 365.25 days, a month is
+// 30.4375 days, a week is 7 days, and days, hours, minutes, seconds and
+// milliseconds follow the obvious conversions. The absolute value is divided by
+// the largest unit first and the remainder is carried down to the next unit, so
+// the counts are computed greedily from largest to smallest. Every unit except
+// the last is floored to a whole number; the final unit keeps its fractional
+// part, which is why 1500 ms renders as "1.5 seconds". The Largest option caps
+// how many non-zero units appear in the output, and Round rolls smaller units
+// up into larger ones (with carry) when enabled.
+//
+// The zero value of Options selects the defaults, which match humanize-duration:
+// the unit set y, mo, w, d, h, m, s (milliseconds are only shown when requested
+// via Units), a ", " delimiter, a " " spacer between count and name, no cap on
+// the number of units, and no rounding. Units that come out to zero are omitted,
+// so only the significant parts of a duration are printed. When the whole
+// duration reduces to nothing, a single zero-valued phrase built from the
+// smallest configured unit is returned, which is why Humanize(0) yields
+// "0 seconds" rather than an empty string. Negative inputs are formatted from
+// their absolute value and prefixed with "-", and counts are pluralized so that
+// exactly 1 uses the singular name and any other value uses the plural.
+//
+// Parity with Node is close but not total. The port covers English output and
+// the Units, Largest, Delimiter, Round and Spacer options; it deliberately
+// omits humanize-duration's other locales, custom unit-measure overrides,
+// per-unit formatting hooks, decimal/digit-replacement settings and the
+// "largest"/"maxDecimalPoints" interactions beyond what is described above.
+// Number formatting uses Go's strconv with trailing zeros trimmed, so values
+// print without a fixed decimal width. Callers needing behaviour outside this
+// subset should supply an explicit Options value or format the count themselves.
 package humanizeduration
 
 import (

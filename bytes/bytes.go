@@ -1,6 +1,51 @@
 // Package bytes converts between byte counts and human readable strings,
 // modeled on the npm "bytes" package by TJ Holowaychuk. Units are binary
-// (1KB = 1024 bytes).
+// (1KB = 1024 bytes). It reimplements that package's two headline operations,
+// parsing a size string into a number of bytes and formatting a number of bytes
+// into a size string, using only the Go standard library.
+//
+// This is the utility Express and its middleware use to accept and display byte
+// sizes in a form people actually write. You use Parse to turn a configuration
+// value or request field such as "100kb" or "1.5mb" into an int64 you can
+// compare against, for example when enforcing a request body size limit, and you
+// use Format (or FormatOpts) to turn a raw count back into a compact label such
+// as "1.5MB" for logs, dashboards, or API responses. Keeping both directions in
+// one place means the same unit conventions apply whether a size is being read
+// in or printed out.
+//
+// The unit ladder is binary rather than decimal: B, KB, MB, GB, TB and PB step
+// up by factors of 1024, matching the npm package and exposed here as the
+// package-level constants B through PB. Parse uses a case-insensitive regular
+// expression to accept an optional sign, an integer or decimal number, optional
+// spaces, and an optional unit suffix; a value with no unit is interpreted as a
+// bare byte count. The parsed number is multiplied by the unit's magnitude and
+// floored to an integer, so "1.5kb" yields 1536 and fractional bytes are always
+// rounded down toward zero in magnitude. Format walks the ladder to pick the
+// largest unit whose magnitude does not exceed the (absolute) value, divides,
+// and by default renders up to two decimal places with insignificant trailing
+// zeros trimmed, so 1024 becomes "1KB" and 500 becomes "500B".
+//
+// FormatOpts exposes the knobs the npm options object provides. DecimalPlaces
+// overrides the default of two fractional digits, FixedDecimals keeps trailing
+// zeros instead of trimming them (so 1GB can render as "1.00GB"), UnitSeparator
+// inserts a string such as a space between the number and the unit, and Unit
+// forces a specific unit instead of auto-selecting one, letting you express a
+// value in KB even when MB would otherwise be chosen. Edge cases are handled
+// predictably: zero formats as "0B", negative counts keep their sign while unit
+// selection is based on magnitude, and an unrecognized forced unit falls back to
+// dividing by one. Parse returns a descriptive error for input that does not
+// match the expected shape, including empty strings, non-numeric text, and a
+// unit with no number.
+//
+// The parity with the Node original is close but adapted to Go. Parse and
+// Format map to the npm package's parse and format calls, and FormatOptions
+// mirrors its options object field-for-field. The differences are idiomatic:
+// pointer fields (DecimalPlaces) stand in for JavaScript's "option present or
+// undefined" distinction, Parse returns an (int64, error) pair instead of
+// returning null on failure, and the numeric type is Go's int64 rather than a
+// JavaScript number. The rounding, unit thresholds, and default two-decimal
+// trimmed formatting are intended to produce the same strings the npm bytes
+// package produces for the same inputs.
 package bytes
 
 import (

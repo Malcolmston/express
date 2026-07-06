@@ -1,8 +1,43 @@
 // Package etag creates HTTP entity tags, a port of the npm "etag" package.
 //
-// A strong tag is formatted as "<hex-len>-<base64-sha1>" where the base64 of
-// the SHA-1 digest is truncated to 27 characters. A stat-based tag is formatted
-// as "<hex-size>-<hex-mtime-ms>". Weak tags are prefixed with "W/".
+// An entity tag (ETag) is an opaque validator that a server sends in the ETag
+// response header so that clients can make conditional requests with
+// If-None-Match or If-Match. When the representation of a resource changes its
+// ETag changes, allowing caches and browsers to revalidate cheaply and servers
+// to answer unchanged requests with 304 Not Modified instead of resending the
+// body.
+//
+// Use Generate when you have the full response body in memory and want a value
+// derived from the content itself. Use GenerateStat when you would rather avoid
+// hashing a large payload and can instead identify a file by its size and last
+// modification time, which is what express and send do for static files. Both
+// return a ready-to-use header value, including the surrounding double quotes.
+//
+// The content algorithm mirrors the Node original: it takes the SHA-1 digest of
+// the bytes, base64-encodes it with standard encoding, and truncates the result
+// to 27 characters (dropping the trailing base64 padding). The byte length is
+// formatted as lowercase hexadecimal and the two parts are joined with a hyphen
+// inside double quotes, producing "<hex-len>-<base64-sha1>". GenerateStat uses a
+// cheaper scheme, formatting the size and the modification time in milliseconds
+// since the Unix epoch as lowercase hex and joining them as
+// "<hex-size>-<hex-mtime-ms>".
+//
+// A weak tag differs from a strong tag only by a leading "W/" marker. Strong
+// tags assert byte-for-byte equality, while weak tags assert that two
+// representations are semantically equivalent even if their bytes differ; when
+// weak is true both functions simply prepend "W/" to the quoted tag. Empty
+// content is fully supported: Generate of an empty slice yields the well-known
+// SHA-1 of the empty string, "0-2jmj7l5rSw0yVb/vlWAYkK/YBwk", and GenerateStat
+// of a zero size and the Unix epoch yields "0-0". Neither function can fail, so
+// there is no error return.
+//
+// Compared to the Node package, this port keeps the exact tag format but exposes
+// two explicit entry points instead of a single overloaded function. The Node
+// etag(entity, options) accepts a string, Buffer, or fs.Stats and infers weak
+// versus strong from the options and the entity type (stat-based tags default to
+// weak there); here the caller chooses Generate versus GenerateStat and passes
+// the weak flag directly. Streaming inputs and the automatic weak default for
+// stats are intentionally omitted in favour of this smaller, explicit surface.
 package etag
 
 import (

@@ -1,6 +1,48 @@
 // Package rewrite provides URL-rewriting middleware. It transparently changes
 // the request path before it reaches the routing layer, supporting regular
-// expression matching with $1-style capture-group substitution.
+// expression matching with $1-style capture-group substitution. It is the
+// express framework's Go analogue of Node URL rewriters such as
+// express-urlrewrite and connect-modrewrite, and of the internal-rewrite subset
+// of Apache's mod_rewrite: an express.Handler that quietly maps an incoming URL
+// onto a different internal path without the client ever seeing a redirect.
+//
+// Reach for this middleware to decouple your public URL surface from your route
+// definitions — serving legacy or vanity paths from a new handler, collapsing a
+// family of URLs onto one route, versioning an API prefix, or normalizing paths
+// — all without issuing 3xx redirects or teaching every handler about the old
+// shape. Because the rewrite is internal, the browser's address bar and the
+// client's view of the URL are unchanged; only the server's routing sees the new
+// path. Use a redirect (res.Redirect) instead when you actually want the client
+// to learn the canonical URL.
+//
+// Operationally the middleware belongs before the routes it should affect,
+// typically among the first Use calls. On each request it reads req.Raw.URL.Path
+// and walks its compiled rules in order. The first rule whose expression matches
+// the path wins: the middleware computes the replacement with the rule's To
+// template and calls req.SetPath, which updates the router's match path so the
+// request genuinely re-routes rather than merely changing what handlers observe.
+// It then stops scanning and calls next(); if no rule matches, the path is left
+// untouched and next() is still called. The middleware never writes a response or
+// short-circuits — it only rewrites and continues.
+//
+// Rules are configured through Options.Rules, an ordered slice of Rule. Each
+// Rule supplies either a precompiled From (*regexp.Regexp) or a Pattern string
+// compiled once at construction, plus a To replacement that may reference capture
+// groups with the $1, $2, ... syntax accepted by regexp.ReplaceAllString. When
+// both From and Pattern are set, From takes precedence. Ordering is significant
+// because only the first match applies, so list more specific rules before
+// broader ones. Any rule whose Pattern fails to compile — and any rule with
+// neither From nor a non-empty Pattern — is silently skipped at construction
+// time rather than causing a panic, so a single bad pattern never disables the
+// rest.
+//
+// Compared with the Node originals this port is deliberately focused. It rewrites
+// the URL path only: it does not match or rewrite the query string, method, or
+// host, offers no [L]/[R]/[F] style flags, no proxy or external-redirect modes,
+// and no conditional RewriteCond predicates. Matching is Go's RE2-based regexp,
+// so backreferences and other PCRE-only features are unavailable, and replacement
+// uses $1 rather than the \1 form some tools accept. For anything beyond
+// first-match, path-only substitution, compose it with your own handler logic.
 package rewrite
 
 import (

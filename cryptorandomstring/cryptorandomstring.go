@@ -1,6 +1,47 @@
 // Package cryptorandomstring is a standard-library port of the npm
 // "crypto-random-string" library. It generates cryptographically strong random
-// strings via crypto/rand with unbiased sampling.
+// strings via crypto/rand with unbiased sampling, and offers the same set of
+// named character-set presets as the original module.
+//
+// Use this package anywhere you need a random token that must be hard to
+// guess: session identifiers, API keys, password-reset tokens, one-time
+// codes, filenames for temporary uploads, and similar. Because it draws from
+// crypto/rand rather than math/rand, the output is suitable for security
+// contexts where predictability would be a vulnerability. When you only need
+// a random hex string, the Hex convenience wrapper covers the common case;
+// for anything else, Generate takes an Options struct that selects a preset
+// character set or supplies a completely custom one.
+//
+// The generation algorithm produces one output rune at a time. For each
+// position it calls crypto/rand.Int with an upper bound equal to the size of
+// the character set, then indexes into the set with the result. Using
+// crypto/rand.Int (which performs rejection sampling internally) rather than
+// reducing a random byte modulo the set size is what keeps the distribution
+// unbiased: every character is equally likely regardless of whether the set
+// length divides evenly into a power of two. The character set is treated as
+// a slice of runes, so multi-byte Unicode characters in a custom Characters
+// string each count as a single output element.
+//
+// The available presets mirror the Node library: "hex" (the default,
+// 0-9a-f), "base64", "url-safe", "numeric", "distinguishable" (a reduced set
+// that omits visually ambiguous glyphs such as 0/O and 1/l), "ascii-printable",
+// and "alphanumeric". Options.Characters, when non-empty, overrides Type and
+// is used verbatim as the literal set. Regarding semantics and edge cases:
+// a negative Length is an error; a Length of zero yields an empty string with
+// no error; an unknown Type is an error; and an explicitly empty character set
+// (an empty Characters together with no usable preset) is an error. Errors
+// from the underlying crypto/rand reader are propagated to the caller rather
+// than swallowed.
+//
+// Parity with the npm original is close in behavior but idiomatic in shape.
+// The preset names and their character contents match, the unbiased sampling
+// matches, and the default type is "hex" in both. The differences are those
+// you would expect from a Go port: the API is a single Generate function
+// taking an Options value plus a Hex helper, instead of a JavaScript function
+// with an options object; errors are returned explicitly instead of thrown;
+// and output is a Go string of runes. Length is measured in characters
+// (runes), matching the Node library's character-count semantics rather than
+// raw byte count.
 package cryptorandomstring
 
 import (

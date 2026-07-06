@@ -1,5 +1,51 @@
 // Package totp implements time-based one-time passwords as defined in RFC 6238,
-// the codes used by authenticator apps for two-factor authentication.
+// the short numeric codes that authenticator apps such as Google Authenticator,
+// Authy, and 1Password display for two-factor authentication. It is a
+// stdlib-only Go port of the TOTP functionality found in the popular npm
+// libraries "otplib", "speakeasy", and "totp": generating the current code from
+// a shared secret and verifying a user-supplied code against a small window of
+// recent and upcoming time steps. It validates against the RFC 6238 Appendix B
+// test vectors.
+//
+// TOTP is the time-based cousin of HOTP (RFC 4226). Both derive a code by
+// applying HMAC to an 8-byte big-endian counter keyed by the shared secret and
+// then performing the RFC 4226 "dynamic truncation" to extract a 31-bit number
+// that is reduced modulo 10^digits and zero-padded to a fixed width. The one
+// difference is what feeds the counter: HOTP uses an explicit counter that both
+// sides advance on each use, while TOTP computes the counter from the clock as
+// floor(unixTime / period). Because the server and the authenticator app share
+// only the secret and read the same wall clock, they independently arrive at the
+// same code with no network round trip.
+//
+// Behavior is controlled by Options: Digits (the code length, default 6),
+// Period (the time step in seconds, default 30), and Algorithm (the HMAC hash,
+// "SHA1", "SHA256", or "SHA512", default "SHA1"). Passing a nil *Options, or
+// leaving any field at its zero value, selects that field's default, matching
+// the conventional authenticator-app configuration. An unsupported algorithm
+// name causes Generate and GenerateAt to return an error and Verify to report
+// false. The 30-second period means a given code is valid for the remainder of
+// its step; a period of 30 turns over on every multiple of 30 seconds of Unix
+// time.
+//
+// The secret is supplied as a Base32 string, the encoding used by essentially
+// every authenticator app and QR provisioning URI. Decoding is deliberately
+// lenient: input is upper-cased, embedded spaces are stripped, and missing "="
+// padding is added automatically, so a secret displayed to users as lowercase
+// groups like "gezd gnbv gy3t qojq" decodes the same as its canonical form.
+// Generate produces the code for the current time (via an overridable internal
+// clock), while GenerateAt produces the code for a caller-supplied time.Time,
+// which makes deterministic testing and code-at-a-past-instant use cases
+// possible.
+//
+// Verify accepts a window parameter that tolerates clock skew between the server
+// and the client's device. It recomputes the expected code for the current step
+// and for every step from -window to +window around it, so a window of 1 accepts
+// the previous, current, and next steps (roughly a 90-second span with the
+// default 30-second period). Each candidate is compared to the supplied code
+// with crypto/subtle.ConstantTimeCompare, so a match cannot be distinguished
+// from a near-miss by timing, mirroring the constant-time comparison used by the
+// reference JavaScript libraries. A window of 0 requires the code to match the
+// current step exactly.
 package totp
 
 import (

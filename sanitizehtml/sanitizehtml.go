@@ -1,14 +1,45 @@
 // Package sanitizehtml sanitizes untrusted HTML by removing disallowed tags
 // and attributes, mirroring a practical subset of the npm "sanitize-html"
-// library.
+// library. It is intended for the common case of accepting rich text from a
+// user (comments, profile bios, CMS fields) and rendering it back into a page
+// without opening the door to cross-site scripting or layout-breaking markup.
 //
-// Tags not present in Options.AllowedTags have their markup removed while their
-// inner text content is preserved. Allowed tags keep only the attributes named
-// in Options.AllowedAttributes (keyed by tag name, with "*" applying to every
-// tag). The contents of <script> and <style> elements are always discarded.
+// Sanitization is driven by an allowlist rather than a blocklist, which is the
+// safe default: only tags that appear in Options.AllowedTags survive, and on
+// those surviving tags only the attributes named in Options.AllowedAttributes
+// are kept. Everything else is discarded. Because the policy enumerates what is
+// permitted instead of what is forbidden, a novel or misspelled tag is stripped
+// automatically rather than slipping through. DefaultOptions returns a policy
+// equivalent to the sanitize-html defaults, allowing common formatting tags
+// plus href/name/target on <a> and the usual source attributes on <img>.
 //
-// The tokenizer is implemented with the standard library only; no third-party
-// HTML parser is used.
+// The implementation tokenizes the input with the standard library only; no
+// third-party HTML parser is used. The tokenizer scans the string once and
+// emits a flat stream of text, start-tag, and end-tag tokens. HTML comments
+// (<!-- ... -->) and declarations such as <!DOCTYPE html> are dropped during
+// scanning, and a stray '<' that does not begin a valid tag is treated as
+// literal text. Start tags are parsed into a tag name plus a list of
+// attribute name/value pairs, with entity references in attribute values
+// unescaped so that they can be re-escaped consistently on output.
+//
+// Disallowed tags are stripped in a way that preserves the reader's content:
+// the tag's angle-bracket markup is removed but the text between the opening
+// and closing tags is emitted verbatim, so "<foo>hello</foo>" becomes "hello".
+// The two exceptions are <script> and <style>, whose entire raw contents are
+// consumed and discarded rather than surfaced as text, preventing script
+// source or CSS from leaking into the output. On surviving start tags each
+// attribute is checked against AllowedAttributes (honoring the "*" key that
+// applies to every tag), disallowed attributes are dropped, and the retained
+// attribute values are re-escaped with html.EscapeString before serialization.
+//
+// Parity with the Node library is deliberately partial. This port covers the
+// tag and attribute allowlist model, text-preserving tag removal, and the
+// script/style content stripping that most callers rely on. It does not
+// implement the richer sanitize-html features such as per-attribute value
+// filtering, URL scheme validation, CSS style parsing, allowed classes,
+// transformTags, or exclusiveFilter callbacks. Tag and attribute names are
+// compared case-insensitively (lower-cased), matching the way browsers treat
+// HTML, and output tag names are normalized to lower case.
 package sanitizehtml
 
 import (

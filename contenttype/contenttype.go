@@ -1,5 +1,43 @@
 // Package contenttype parses and formats HTTP Content-Type header values,
-// modeled on the npm "content-type" package and RFC 7231.
+// modeled on the npm "content-type" package and RFC 7231, using only the Go
+// standard library. It provides Parse to decode a header value into a
+// ContentType struct and Format to serialize a ContentType back into a header
+// value.
+//
+// The Content-Type header names the media type of a message body and carries
+// optional parameters such as the character set. You use Parse on the receiving
+// side to learn the media type and, for example, the charset of a request or
+// response body, and Format on the sending side to build a well-formed header
+// from a media type and a parameter map. Both operations are pure functions, so
+// they are convenient to test and to reuse outside of a live HTTP handler.
+//
+// Parse splits the value at the first ';' into a media type and a parameter
+// list. The media type is trimmed and lower-cased and must match the RFC 7230
+// token "/" token grammar or an error is returned. The remainder is scanned one
+// "; name=value" parameter at a time with a regular expression built from the
+// token character class; each parameter name is lower-cased, and a value given
+// as a quoted string is unquoted and has its backslash escapes removed. A
+// value that is a bare token is taken verbatim. Any input that does not match
+// the parameter grammar, including a trailing "name" with no "=value", produces
+// an error.
+//
+// Format is the inverse and validates as it goes. The Type field must be a
+// valid media type or Format returns an error. Parameters are emitted in sorted
+// name order so the output is deterministic, which makes it stable to compare
+// or snapshot; each name must be a valid token. A parameter value that is
+// itself a valid token is written unquoted, while any other value is wrapped in
+// double quotes with backslashes and quotes escaped. Note that parameter names
+// are lower-cased on Parse but Format writes the names it is given as-is, and
+// that parameter values preserve their original case in both directions.
+//
+// The result is faithful to the npm content-type package for typical headers:
+// the token and quoted-string grammar, the lower-casing of the type and
+// parameter names, the case preservation of values, and the quoting rules on
+// output all match. The main intentional differences are that this port sorts
+// parameters by name for deterministic output rather than preserving insertion
+// order, and it uses Go-idiomatic error values instead of thrown TypeError
+// objects, so error messages are prefixed with "contenttype:" rather than
+// matching the Node text verbatim.
 package contenttype
 
 import (

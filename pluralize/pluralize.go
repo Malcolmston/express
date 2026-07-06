@@ -1,9 +1,43 @@
-// Package pluralize pluralizes and singularizes English words.
+// Package pluralize pluralizes and singularizes English words. It is a faithful
+// port of the npm package "pluralize", reproducing its rule set, irregular and
+// uncountable word lists, and case-preserving behaviour using only the Go
+// standard library (regexp, strconv and strings).
 //
-// It is a faithful port of the npm package "pluralize". It handles irregular
-// words (person/people, mouse/mice, ...), uncountable words (fish, sheep, ...)
-// and the usual regular rules (-s, -es, -ies, -ves, ...) while preserving the
-// case of the input where natural.
+// English is used everywhere in software — UI labels, log messages, generated
+// API and ORM names — and constantly needs the correct grammatical number: "1
+// file" but "3 files", "1 person" but "2 people". Hand-writing that logic is
+// error-prone because English pluralization is deeply irregular. This package
+// centralizes the rules so callers can convert in either direction (Plural and
+// Singular) or merely ask which form a word is already in (IsPlural and
+// IsSingular).
+//
+// Conversion proceeds through three tiers, checked in order. First, uncountable
+// words and patterns (fish, sheep, series, information, and patterns such as
+// "-ese" nationalities) are returned unchanged in both directions. Second,
+// explicit irregular pairs (person/people, mouse/mice, foot/feet, ox/oxen,
+// die/dice, ...) are looked up directly. Third, when no special case applies, an
+// ordered list of regular regular-expression rules is scanned from the end toward
+// the beginning and the first matching rule is applied — this is how the common
+// suffix transformations (-s, -es, -ies, -ves, and many Latin/Greek endings like
+// -us/-i, -a/-ae, -ix/-ices) are handled.
+//
+// Case of the input is preserved wherever it is natural. If the input is all
+// lower case the result is lower case; all upper case yields upper case; and a
+// leading capital ("Bus") produces a capitalized result ("Buses"). This mirrors
+// the reference library's restoreCase logic so that pluralizing "Person" gives
+// "People" rather than "people". Matching against the rule and word lists is
+// always done case-insensitively on a lower-cased token, with casing reapplied to
+// the final output.
+//
+// Edge cases and Node parity: an empty string is returned unchanged. Operations
+// are idempotent in the sense that pluralizing an already-plural word, or
+// singularizing an already-singular word, leaves it unchanged (Plural("people")
+// is "people"). IsPlural and IsSingular are exact complements for countable
+// words and both return true for uncountable words, since those forms are
+// identical. The rules and word lists are ported verbatim from the JavaScript
+// source, so results should agree with pluralize for the shared vocabulary;
+// custom-rule registration functions from the Node API are internal helpers here
+// rather than an exported extension surface.
 package pluralize
 
 import (

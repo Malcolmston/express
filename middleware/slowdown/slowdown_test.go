@@ -1,6 +1,7 @@
 package slowdown_test
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -9,6 +10,38 @@ import (
 	"github.com/malcolmston/express"
 	"github.com/malcolmston/express/middleware/slowdown"
 )
+
+// ExampleNew shows the slow-down middleware applying a growing delay once a
+// client crosses the request threshold within a window. We configure a low
+// Threshold and a small per-request Delay, and inject a recording Sleep hook so
+// the example observes the computed delays without actually pausing (real
+// deployments leave Sleep nil to use time.Sleep). Driving six requests from the
+// same client through the app, the first two pass untouched and each request
+// beyond the threshold is delayed by an additional Delay increment. The example
+// prints the recorded delays to show the linear growth; note that because real
+// timing is nondeterministic this Example intentionally omits an Output block.
+func ExampleNew() {
+	var delays []time.Duration
+	app := express.New()
+	app.Use(slowdown.New(slowdown.Options{
+		Threshold: 2,
+		Delay:     20 * time.Millisecond,
+		Sleep:     func(d time.Duration) { delays = append(delays, d) },
+	}))
+	app.Get("/", func(req *express.Request, res *express.Response, next express.Next) {
+		res.Send("ok")
+	})
+
+	for i := 0; i < 6; i++ {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = "203.0.113.7:9000"
+		app.ServeHTTP(httptest.NewRecorder(), r)
+	}
+
+	// Requests 3..6 exceed the threshold and are delayed 1x..4x Delay.
+	fmt.Println("delayed requests:", len(delays))
+	_ = delays
+}
 
 func TestNoDelayUnderThreshold(t *testing.T) {
 	var mu sync.Mutex

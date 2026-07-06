@@ -1,7 +1,47 @@
 // Package ms converts between time durations and human readable strings,
 // modeled on the npm "ms" package. It parses strings such as "2h", "1d" or
 // "2.5 days" into time.Durations and formats time.Durations back into short
-// ("2h") or long ("2 hours") forms.
+// ("2h") or long ("2 hours") forms. The npm original is one of the most widely
+// depended-on utilities in the Node ecosystem, used throughout Express and its
+// middleware for things like cookie max-ages, cache lifetimes and timeout
+// configuration; this package is a standard-library-only Go port of it.
+//
+// The point of the package is to let humans and configuration files express
+// durations in a friendly notation while your code works with a real
+// time.Duration. You write "30d" or "2.5 hours" in a config value or a
+// command-line flag and Parse turns it into something you can add to a
+// time.Time or hand to a timer. Going the other way, Format and FormatLong
+// turn a computed duration back into a compact label for logs, UIs or error
+// messages. All functions are pure, allocation-light and safe for concurrent
+// use.
+//
+// Parse works in the "string to duration" direction. It understands an
+// optional sign, an integer or decimal number, optional surrounding spaces and
+// a unit, where the unit may be spelled short (ms, s, m, h, d, w, y) or long
+// (millisecond(s), second(s), minute(s), hour(s), day(s), week(s), year(s))
+// along with common abbreviations like "secs", "mins" and "hrs". Matching is
+// case-insensitive. A bare number with no unit is interpreted as milliseconds,
+// so Parse("100") is 100 milliseconds, exactly as in the npm package. Years are
+// treated as 365.25 days and weeks as 7 days.
+//
+// Format and FormatLong work in the "duration to string" direction, which the
+// npm ms package selects with its { long } option. Both pick the largest unit
+// whose absolute magnitude is at least one — days, hours, minutes, seconds or
+// milliseconds — and round to the nearest whole count. Format produces the
+// terse form ("2h", "-1500ms"); FormatLong produces the spelled-out form
+// ("2 hours", "1 minute") with pluralization that, matching the original,
+// switches to the plural name once the magnitude reaches 1.5 units. Negative
+// durations are supported in both directions: Parse accepts a leading "-" and
+// the formatters preserve the sign.
+//
+// A few edge cases are worth noting for parity with Node. Empty input is an
+// error rather than zero, and an input longer than 100 characters is rejected
+// outright as a guard against pathological strings. Anything that does not
+// match the number-and-optional-unit grammar (an unknown unit, stray letters,
+// multiple numbers) yields an error instead of a silent zero. Unlike the
+// JavaScript version, which returns undefined or NaN on bad input, this port
+// returns an explicit Go error, so callers can decide how to handle malformed
+// values.
 package ms
 
 import (

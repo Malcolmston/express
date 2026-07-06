@@ -1,6 +1,53 @@
 // Package cuid generates collision-resistant unique identifiers, a Go port of
-// the npm "cuid" package. Ids are monotonic, URL-safe, and safe to generate
-// across many hosts without coordination.
+// the npm "cuid" package (in the style of its cuid2 successor). Ids are
+// URL-safe, hard to guess, and safe to generate across many hosts and
+// processes without any central coordination or shared state.
+//
+// Reach for a cuid when you need a unique identifier for a database row, an
+// event, an uploaded object, or a distributed message, and you want something
+// friendlier than a raw UUID: the output is a short lowercase alphanumeric
+// string that always begins with a letter, so it is safe to use in URLs, as
+// an HTML element id, or as a filename without escaping. Unlike a
+// sequential integer key, a cuid reveals little about how many ids have been
+// issued and does not require a round trip to a central allocator, which
+// makes it convenient for client-side generation and for sharded systems.
+//
+// Each id is derived by hashing several independent sources of entropy
+// together with SHA-512 and encoding the digest in base-36. The inputs are:
+// the current wall-clock time in nanoseconds (base-36 encoded), a
+// process-global atomic counter that is seeded from crypto/rand at startup
+// and incremented on every call, a block of fresh random characters drawn
+// per call, and a per-process fingerprint built from the PID, hostname, and
+// additional random salt. Mixing a monotonic counter and a timestamp with
+// per-call and per-process randomness is what gives the scheme its
+// collision resistance: even two calls in the same nanosecond on the same
+// host receive distinct counter values and distinct random blocks. The first
+// character of the id is an independently chosen random letter (never a
+// digit), and the first character of the hash body is dropped because it can
+// be biased toward low values.
+//
+// A few semantics and edge cases are worth noting. New produces ids of
+// DefaultLength (24) characters. NewLength lets you choose a length, but the
+// value is clamped to the range 2..32 rather than rejected: a request for a
+// length below 2 is treated as 2 and one above 32 as 32, so NewLength never
+// returns an out-of-range id. When the hash body is shorter than the
+// requested length it is extended with additional random characters and then
+// truncated to exactly n. IsCuid performs a syntactic check only: it accepts
+// strings of length 2..32 that start with a lowercase letter and otherwise
+// contain only lowercase letters and digits; it does not and cannot verify
+// that a string was actually produced by this package. Although the functions
+// return an error for interface symmetry, generation does not fail in
+// practice because crypto/rand failures fall back to deterministic defaults.
+//
+// Parity with the JavaScript cuid family is at the level of guarantees rather
+// than byte-for-byte output. Ids from this package share the important
+// properties of the original: they are horizontally scalable, monotonically
+// influenced by time, start with a letter, use a URL-safe lowercase
+// alphanumeric alphabet, and resist collisions and guessing. Because the
+// fingerprint incorporates this process's PID, hostname, and random salt, and
+// because the counter is seeded randomly, the exact strings are not
+// reproducible across runs or portable from a Node process; the intent is a
+// compatible identifier scheme, not identical values.
 package cuid
 
 import (

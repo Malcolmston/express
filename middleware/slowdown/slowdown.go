@@ -1,12 +1,48 @@
 // Package slowdown provides middleware that progressively delays responses for
 // a client once it exceeds a configured request threshold within a fixed
-// window. It mirrors the behaviour of express-slow-down: the first requests are
-// served immediately, and each subsequent request beyond the threshold incurs
-// an increasing delay.
+// window. It is the express framework's Go analogue of the Node
+// express-slow-down package (express-rate-limit/express-slow-down): rather than
+// rejecting bursts outright the way a rate limiter does, it lets the first
+// requests through untouched and then adds a growing pause to each further
+// request, gently discouraging abuse while keeping legitimate traffic working.
 //
-// So that it remains deterministic and testable, the actual sleeping is
-// delegated to a Sleep hook (defaulting to time.Sleep). The computed delay is
-// also stored on the request via req.Set("slowdown-delay", d) for inspection.
+// Reach for this middleware to blunt brute-force and scraping attempts, to
+// smooth spikes against an expensive endpoint, or as a softer companion to a
+// hard rate limiter — the slow-down absorbs the shoulder of a burst so fewer
+// requests ever reach the limiter's cutoff. It pairs naturally with a login or
+// search route where a slightly slower response is an acceptable price for
+// throttling an attacker but a limiter's outright 429 would be too blunt.
+//
+// Operationally the middleware sits near the front of the chain. On each request
+// it derives a bucket key with Options.KeyFunc (the client IP via req.IP by
+// default), looks up that key's fixed window, and either reuses the current
+// window or, if the window's reset time has passed, starts a fresh one of length
+// Options.Window. It increments the window's count under a mutex, and when the
+// count exceeds Options.Threshold it computes a delay of (count-Threshold) *
+// Options.Delay, capped at Options.MaxDelay when that is set. The delay is
+// recorded on the request with req.Set("slowdown-delay", d) for inspection or
+// logging, the Options.Sleep hook is invoked to actually wait, and then next()
+// is always called — this middleware never short-circuits or rejects a request,
+// it only slows it.
+//
+// Several defaults and semantics matter. Threshold defaults to 5, Window to one
+// minute, and Delay to 100ms; a MaxDelay of 0 means the delay grows without
+// bound. Counting uses a fixed window (not a sliding one), so all buckets tied
+// to a key reset together when the window elapses, which permits a brief burst
+// at a window boundary. The Sleep and Now hooks default to time.Sleep and
+// time.Now and exist chiefly for testing: injecting a recording Sleep and a
+// controllable Now makes the otherwise time-dependent behavior deterministic.
+// The in-memory bucket map is guarded by a sync.Mutex, so the middleware is safe
+// for concurrent requests within a single process.
+//
+// Compared with express-slow-down this port keeps the core "delay after N
+// requests, increasing per request" contract but is deliberately compact. Its
+// counters live only in process memory, so they are per-instance and lost on
+// restart with no Redis or shared-store backend; it exposes no
+// skipSuccessfulRequests/skipFailedRequests filtering, no per-key limit
+// overrides, and no response headers advertising the current delay. The delay is
+// applied by sleeping before next() rather than by scheduling, and the growth is
+// strictly linear in the request count with an optional hard cap.
 package slowdown
 
 import (
