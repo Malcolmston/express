@@ -1,13 +1,50 @@
 // Package camelcase converts dash/dot/underscore/space separated (and
 // mixed-case) strings into camelCase or PascalCase, modeled on the npm
-// "camelcase" package.
+// "camelcase" package that Express-adjacent tooling uses to normalize option
+// keys, identifiers, and header-derived names. It exposes CamelCase for the
+// default lower-first form, PascalCase for the upper-first form, and
+// CamelCaseWith for callers that want to choose the style through an Options
+// value, all built on only the Go standard library.
 //
-// Delimiters (spaces, hyphens, underscores, and any other non-alphanumeric
-// characters) separate words. Case boundaries are also treated as word
-// boundaries so that "fooBar" splits into "foo" and "Bar". Runs of consecutive
-// uppercase letters are lowercased by default (for example "FOOBar" becomes
-// "fooBar"). Leading and trailing separators are ignored, sequences of
-// separators collapse, and embedded numbers are preserved.
+// Reach for this package whenever human-written or wire-format names have to be
+// turned into program-friendly identifiers: converting "user-id" or "user_id"
+// from a config file into "userId", mapping "Content-Type" style header names to
+// struct-field-like tokens, or normalizing the many separator conventions a
+// single input source might mix together. Keeping the word-splitting rules in one
+// place means "foo-bar", "foo_bar", "foo bar", and "fooBar" all collapse to the
+// same canonical output regardless of how the caller happened to write them.
+//
+// Word splitting is driven by two kinds of boundary. Delimiters — spaces,
+// hyphens, underscores, and every other character that is neither a letter nor a
+// digit — separate words and are discarded. Case transitions are also boundaries:
+// a lower-case or digit followed by an upper-case letter starts a new word (so
+// "fooBar" splits into "foo" and "Bar"), and a run of upper-case letters
+// immediately followed by a lower-case letter breaks just before that final
+// upper-case letter (so "HTTPServer" splits into "HTTP" and "Server", and
+// "FOOBar" into "FOO" and "Bar"). Each recovered word is then normalized by
+// lower-casing it entirely and, for every word after the first in camelCase or
+// every word in PascalCase, upper-casing its leading rune.
+//
+// The semantics around edges and degenerate input are deliberate. Leading and
+// trailing separators are ignored and consecutive separators collapse, so
+// "__foo__bar__" yields "fooBar"; an input that contains no letters or digits
+// (or the empty string) yields "". Runs of consecutive upper-case letters are
+// lower-cased by default rather than preserved, matching the npm package's
+// non-preserveConsecutiveUppercase default, so "FOOBar" becomes "fooBar" and not
+// "fOOBar". Embedded digits are preserved and treated as ordinary in-word
+// characters, so "foo2bar" stays "foo2bar" rather than gaining a spurious word
+// boundary at the digit. The transformation operates on runes, so multi-byte
+// letters are handled without corrupting the encoding.
+//
+// Parity with the Node original covers the common cases: the same separator set,
+// the same case-boundary detection, and the same lower-first/upper-first output
+// for typical identifiers. The intentional differences are idiomatic. The API is
+// three exported Go functions plus an Options struct rather than a single
+// JavaScript function with an options object, and this port implements only the
+// default behavior of the more exotic npm flags (it does not offer
+// locale-specific casing or a preserveConsecutiveUppercase toggle). Where a
+// choice had to be made the default lodash/camelcase behavior is followed so that
+// results line up with what Express developers expect for ordinary ASCII input.
 package camelcase
 
 import (

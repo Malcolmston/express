@@ -1,12 +1,46 @@
-// Package debounce provides a faithful port of lodash's debounce.
+// Package debounce provides a faithful port of lodash's debounce utility,
+// built on only the Go standard library. A debounced function coalesces a burst
+// of rapid calls into a single deferred invocation of the wrapped function,
+// firing it only after activity has quieted down. The package exposes a
+// Debouncer created by New, whose Call method drives the debounced behavior and
+// whose Cancel, Flush, and Pending methods manage the pending invocation.
 //
-// A debounced function delays invoking the wrapped function until after wait
-// has elapsed since the last time the debounced function was invoked. It
-// supports leading and trailing invocation, cancellation, and immediate
-// flushing.
+// Debouncing is the tool you want whenever an event fires far more often than
+// you need to react to it: coalescing a stream of keystrokes into one search
+// request, collapsing a flurry of file-change notifications into a single
+// rebuild, rate-limiting a "save draft" call, or making sure an expensive
+// recomputation runs once after a resize storm rather than on every intermediate
+// step. It keeps the timing bookkeeping out of the caller so the surrounding
+// code only has to say "something happened" by calling Call.
 //
-// The clock is injectable via WithClock so that tests can advance time
-// manually instead of relying on real timers.
+// The core rule is that fn is delayed until wait has elapsed since the most
+// recent Call. Each new Call within the window pushes the deadline back, so the
+// wrapped function runs at most once per quiet period. The edges are
+// configurable: WithLeading(true) invokes fn immediately on the first Call of a
+// burst, WithTrailing(false) suppresses the invocation at the end of the burst
+// (trailing is on by default), and enabling both makes fn fire at the start and,
+// if there were further calls, again at the end. WithMaxWait bounds the total
+// delay so that a continuously active caller cannot starve the invocation
+// forever: once maxWait has elapsed since the last invocation, fn fires even
+// though calls are still arriving.
+//
+// The lifecycle methods mirror lodash. Cancel drops any pending trailing
+// invocation and resets the internal timing state so no deferred call remains.
+// Flush invokes a pending trailing call right away instead of waiting for the
+// timer, which is useful on shutdown or when the caller knows no more events are
+// coming. Pending reports whether a timer is currently armed. fn is always run
+// without the Debouncer's internal lock held, so it is safe for fn to call back
+// into the same Debouncer without deadlocking, and the type is safe for
+// concurrent use from multiple goroutines.
+//
+// Parity with the Node original is at the level of behavior and options: the
+// leading/trailing edge semantics, the maxWait bound, and the cancel/flush
+// operations all match lodash's debounce. The differences are idiomatic. The
+// wrapped function is a plain func() invoked for its side effects rather than a
+// value-returning JavaScript function, options are supplied as functional
+// Option values instead of an options object, and — most usefully for tests —
+// the clock is injectable through WithClock so time can be advanced
+// deterministically with a fake Clock rather than by sleeping on real timers.
 package debounce
 
 import (

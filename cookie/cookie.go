@@ -1,8 +1,48 @@
-// Package cookie parses and serializes HTTP cookie headers.
+// Package cookie parses and serializes HTTP cookie headers, a port of the npm
+// "cookie" package that Express and cookie-parser use to read the Cookie request
+// header and to build Set-Cookie response headers. It exposes Parse to turn a
+// raw "Cookie" header into a map of names to values and Serialize to render a
+// single name/value pair plus its attributes into a Set-Cookie value, using only
+// the Go standard library.
 //
-// It is a port of the npm package "cookie". Parse reads a "Cookie" request
-// header into a map, URL-decoding values. Serialize produces a "Set-Cookie"
-// header value with the given attributes, URL-encoding the value.
+// You reach for this package on both sides of the request/response cycle. On the
+// way in, Parse gives you the individual cookies a client sent so a handler can
+// look up a session id or a preference flag without string-splitting the header
+// itself. On the way out, Serialize produces a well-formed Set-Cookie value with
+// Path, Domain, Expires, Max-Age, Secure, HttpOnly, and SameSite attributes, so
+// you can issue login cookies, clear a cookie by expiring it, or scope a cookie
+// to a path without hand-assembling the syntax and risking a malformed header.
+//
+// Values are transported using JavaScript's encodeURIComponent conventions.
+// Serialize percent-encodes every byte of the value that is not an
+// encodeURIComponent-safe character (letters, digits, and the set -_.!~*'()),
+// which keeps semicolons, commas, spaces, and other separators from corrupting
+// the header. Parse reverses this: it URL-decodes each value, tolerating values
+// that were never encoded, and additionally strips one layer of surrounding
+// double quotes so quoted-string cookie values round-trip. When the same cookie
+// name appears more than once in a header the first occurrence wins, matching the
+// npm package, and pairs with an empty name or no '=' are skipped.
+//
+// Serialize validates its inputs rather than emitting a header that a client
+// would reject. The name must be an RFC 6265 token and the encoded value must be
+// a valid cookie-octet sequence, otherwise an error is returned; Path and Domain
+// must be valid field-content. Max-Age follows net/http conventions rather than
+// dotenv-style literalism: a positive value sets Max-Age to that many seconds, a
+// negative value emits "Max-Age=0" to delete the cookie immediately, and zero
+// omits the attribute entirely. A zero Expires time omits Expires, and an empty
+// SameSite omits SameSite while "Lax", "Strict", and "None" (case-insensitive)
+// are accepted and anything else is an error. Passing a nil *Options serializes
+// just the name and value with no attributes.
+//
+// Parity with the Node original is close for everyday cookie handling: the
+// encodeURIComponent-based value codec, the token and cookie-octet validation,
+// the first-wins duplicate rule, and the attribute names and formats all match.
+// The deliberate differences are idiomatic Go ones. Attributes are supplied
+// through a typed Options struct instead of a plain JavaScript object, the value
+// codec is fixed to encode/decode rather than accepting caller-supplied
+// encode/decode callbacks, Serialize returns an explicit error instead of
+// throwing a TypeError, and Max-Age is interpreted with net/http's sign
+// conventions so it composes naturally with the rest of the standard library.
 package cookie
 
 import (

@@ -1,8 +1,42 @@
-// Package urljoin joins URL path segments together, normalizing slashes.
+// Package urljoin joins URL path segments together, normalizing slashes. It is
+// a standard-library-only Go port of the npm "url-join" package, the small
+// utility countless Node projects use to assemble a URL from a base and one or
+// more path fragments without ending up with doubled or missing slashes. The
+// problem it solves is that naive string concatenation of URL parts produces
+// artifacts like "http://host//api" or "api/v1users" depending on which parts
+// carried trailing or leading slashes; url-join normalizes all of that away.
 //
-// It is a faithful port of the npm package url-join. Segments are joined with a
-// single "/", duplicate slashes are collapsed (while the "://" of a protocol is
-// preserved), and query strings are combined using "?" and "&" separators.
+// URLJoin takes a variadic list of parts and returns a single joined URL.
+// Segments are joined with exactly one "/", runs of duplicate slashes between
+// segments are collapsed to a single slash, leading slashes are stripped from
+// every part after the first, and trailing slashes are stripped from every part
+// before the last. The last part keeps at most a single trailing slash, so an
+// intentional trailing "/" survives while accidental doubles do not. Empty
+// parts are skipped entirely, so passing "" between real segments does not
+// introduce an empty path component.
+//
+// The protocol separator is treated specially so normalization does not damage
+// it. The "://" that follows a scheme such as "http" or "https" is preserved
+// rather than collapsed to a single slash, and a part that is a bare protocol
+// like "http://" is merged with the following part before joining. The "file"
+// scheme is handled distinctly because it canonically uses three slashes:
+// "file:///" keeps its triple slash while other schemes are normalized to the
+// usual "://" form.
+//
+// Query-string and fragment handling is likewise aware of URL structure. A
+// slash that would otherwise sit immediately before a "?", "&", or "#"
+// separator is removed so the query does not begin with a stray slash. When
+// more than one part contributes a query string, the first "?" is kept as the
+// query introducer and every subsequent "?" is rewritten to "&", so joining a
+// base carrying "?a=1" with a fragment carrying "?b=2" yields a single
+// well-formed "?a=1&b=2" query rather than two "?" separators.
+//
+// Parity with the Node original covers the slash collapsing, protocol
+// preservation, file-scheme triple slash, and query-combining behavior that make
+// url-join useful. The implementation uses the same regular-expression-driven
+// approach as the reference library, and the API is reduced to a single
+// idiomatic variadic function, URLJoin, that returns the empty string when called
+// with no parts.
 package urljoin
 
 import (
