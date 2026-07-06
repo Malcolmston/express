@@ -1,11 +1,57 @@
-// Package datefns ports the most commonly used date-fns helpers to Go's
-// time.Time.
+// Package datefns ports the most commonly used helpers from the npm package
+// date-fns (https://date-fns.org) to Go's standard time.Time. It covers the
+// four families that dominate real-world date code: formatting and parsing
+// (Format, Parse, FormatISO, TranslateLayout), calendar arithmetic (AddDays,
+// AddWeeks, AddMonths, AddYears, AddHours, AddMinutes and the matching Sub*
+// helpers), differences (DifferenceInDays/Hours/Minutes/Seconds), interval
+// boundaries (StartOf/EndOf Day, Week, Month, Year) and a set of predicates and
+// humanizers (IsBefore, IsAfter, IsSameDay, IsWeekend, IsLeapYear, GetDayOfYear,
+// FormatDistance). It depends only on the standard library (time, fmt, strings).
 //
-// Formatting and parsing accept date-fns style tokens (yyyy, MM, dd, HH, mm,
-// ss, EEE, MMM, ...) which are translated internally to Go's reference-time
-// layout. See Format for the full token table. All functions are deterministic:
-// they operate only on the time values passed to them and never read the
-// current wall clock.
+// The package exists to smooth the port of Express/JavaScript services to Go.
+// date-fns is the de facto date toolkit in the Node ecosystem, and its function
+// names and semantics are muscle memory for many developers; reproducing them
+// on top of time.Time lets that code move across with minimal translation while
+// staying idiomatic Go. Reach for it when you want date-fns-style call sites
+// (addDays(d, 5), format(d, "yyyy-MM-dd"), differenceInDays(a, b)) without
+// hand-writing AddDate offsets and Go reference-layout strings at every use.
+//
+// Formatting and parsing accept date-fns style tokens (yyyy, yy, MMMM, MMM, MM,
+// dd, EEEE, EEE, HH, hh, mm, ss, SSS, aa, XXX, xx, zzz) which TranslateLayout
+// rewrites into Go's reference-time layout (Mon Jan 2 15:04:05 MST 2006). See
+// Format for the full token table. Translation is done with a two-pass sentinel
+// substitution and orders longer tokens before their prefixes, so a token is
+// never re-matched by a shorter one; any characters that are not recognized
+// tokens are emitted verbatim, letting a layout freely mix tokens with literal
+// text. Parse is the inverse and returns time.Parse's error unchanged when the
+// value does not match the layout.
+//
+// The arithmetic helpers delegate to time.Time's own AddDate and Add, so they
+// inherit Go's calendar rules exactly. Day, week, month and year additions use
+// AddDate and therefore normalize overflowing dates (for example adding a month
+// to January 31 yields March 3 in a non-leap year), while hour and minute
+// helpers add a fixed time.Duration. Negative amounts move backward, and each
+// Sub* helper is defined as the corresponding Add* with a negated amount. The
+// Difference* functions compute a minus b and truncate toward zero, so they
+// report only whole completed units; DifferenceInDays in particular divides the
+// elapsed hours by 24 and does not account for daylight-saving transitions.
+//
+// All functions are deterministic: they operate only on the time values passed
+// to them and never read the wall clock. Time zones are handled by preserving
+// each input's own Location - the StartOf*/EndOf* helpers rebuild the instant in
+// t.Location() rather than converting to UTC, so callers control the zone by
+// choosing the zone of the time they pass in (use time.Date(..., time.UTC) for
+// reproducible results). EndOfDay, EndOfMonth and EndOfWeek truncate to the last
+// representable nanosecond (…:59.999999999) of the interval; StartOfWeek follows
+// date-fns's default of treating Sunday as the first day of the week (so
+// EndOfWeek lands on Saturday). IsSameDay compares both operands in a's location
+// to avoid cross-zone ambiguity, and FormatDistance returns an unsigned,
+// human-readable approximation ("3 days", "about 1 hour") using date-fns's
+// rounding thresholds - use IsBefore/IsAfter to recover direction. This mirrors
+// date-fns closely; the notable differences are Go-imposed: (value, error) or
+// bool return shapes instead of thrown exceptions, method-style helpers rather
+// than an options object, and no built-in locale support for month/weekday
+// names beyond what Go's time package provides (English).
 package datefns
 
 import (

@@ -1,10 +1,54 @@
-// Package validatorjs is a standalone port of the popular npm
-// validator.js / validatorjs string validation library to idiomatic Go.
+// Package validatorjs is a standalone port of the popular npm "validatorjs"
+// (and the closely related "validator.js") string validation library to
+// idiomatic Go. It depends only on the Go standard library and does not import
+// any part of the express package, so it can be used from any program that
+// needs to answer simple "is this string a valid X?" questions.
 //
-// It depends only on the Go standard library and does not import any part of
-// the express package. Every exported function validates a string and returns
-// a boolean indicating whether the input satisfies the corresponding rule,
-// mirroring the behavior of validator.js as closely as is practical.
+// Reach for this package whenever you have a string of unknown provenance -
+// form input, a query parameter, a config value, a webhook payload - and you
+// need a cheap, allocation-light predicate that tells you whether it is a valid
+// e-mail, URL, UUID, credit-card number, IP address, and so on. Every exported
+// function takes a single string and returns a bool: true when the input
+// satisfies the rule and false otherwise. There are no error returns and no
+// panics on ordinary input, which makes the functions convenient to compose
+// inside larger validation logic or to pass around as func(string) bool values.
+//
+// Under the hood most checks are implemented with precompiled package-level
+// regular expressions (for example hexColorRe, slugRe, semVerRe, and the
+// alpha/alphanumeric/numeric/int/float matchers), which keeps them fast and
+// free of per-call compilation cost. A few rules use hand-written logic where a
+// regexp would be awkward or wrong: IsEmail splits on the last "@" and
+// separately bounds and validates the local part and the domain labels; IsURL
+// parses with net/url and then checks the scheme and host; IsIPv4/IsIPv6 defer
+// to net.ParseIP; IsJSON round-trips through encoding/json; and IsCreditCard
+// strips separators, matches a known card-prefix pattern, and then verifies the
+// Luhn checksum. Rune-aware rules such as IsLength and IsStrongPassword count
+// runes with unicode/utf8 rather than bytes.
+//
+// The individual rules carry deliberate semantics and edge cases worth knowing.
+// IsEmail enforces RFC-like length limits (254 overall, 64 for the local part,
+// 253 for the domain) and rejects leading, trailing, or doubled dots in the
+// local part; IsURL accepts only http, https, ftp, and ftps schemes and
+// requires a non-empty host (an IP, "localhost", or a dotted domain); IsUUID
+// accepts any version in the canonical 8-4-4-4-12 hex layout; IsBase64 requires
+// a length that is a multiple of four; IsInt forbids superfluous leading zeros
+// while IsNumeric does not; IsStrongPassword requires at least eight characters
+// with a lowercase letter, an uppercase letter, a digit, and a symbol; and
+// IsLength treats a negative max as "no upper bound". Unlike the npm library,
+// these functions are the whole surface: this port does not expose validatorjs
+// rule strings like "required|email|min:6" or pipe-delimited rule sets, nor the
+// Validator object, its messages, or its option objects.
+//
+// Parity with the Node originals is close but not bit-for-bit. The goal is to
+// match the practical acceptance and rejection behavior of validator.js's most
+// commonly used validators for typical inputs, using the same algorithms
+// (Luhn, semver.org's recommended regexp, the standard card prefixes) where it
+// matters. It differs in that it does not implement locale/option arguments
+// (for example IsMobilePhone is a generic "+ and 7-15 digits" check rather than
+// a per-locale matcher, and IsEmail has no display-name or allow-IP options),
+// and it omits the large catalog of niche validators and all of the sanitizers
+// that validator.js ships. For express request/body/query validation with
+// chainable per-field rules, see the sibling validator package instead.
 package validatorjs
 
 import (

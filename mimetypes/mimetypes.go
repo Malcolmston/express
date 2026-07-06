@@ -1,6 +1,46 @@
 // Package mimetypes provides MIME type lookups by filename or extension and
 // reverse lookups from MIME type to extension. It is a port of the npm
-// mime-types package using only the Go standard library.
+// mime-types package, the module Express uses behind res.type/res.contentType
+// and that content-negotiation middleware relies on, implemented using only
+// the Go standard library. It answers the everyday questions "what
+// Content-Type should I send for this file?" and, going the other way, "what
+// file extension does this MIME type correspond to?".
+//
+// The package is useful anywhere you serve files, set response headers, or map
+// uploads to a canonical type. Rather than depending on the operating system's
+// mime.types database (whose contents vary by machine), it ships a curated,
+// self-contained table covering the common web, image, video, audio, font,
+// document and archive types, so results are identical across platforms. All
+// functions are pure lookups over that table, do no I/O, and are safe for
+// concurrent use.
+//
+// The forward direction is handled by Lookup, which accepts a full path, a bare
+// filename, a ".ext" or a bare extension, extracts the lower-case extension and
+// returns the mapped MIME type. The returned type never carries a charset.
+// ContentType builds on Lookup (or accepts a MIME type directly when the input
+// already contains a "/") and appends "; charset=utf-8" for textual types,
+// giving you a value suitable for a Content-Type header in one call. Charset
+// reports the charset that applies to a given MIME type, treating every text/*
+// type plus JSON, XML, JavaScript and any "+json"/"+xml" structured-suffix
+// type as UTF-8.
+//
+// The reverse direction is Extension, which takes a MIME type (optionally with
+// parameters, which are ignored) and returns its canonical extension without a
+// leading dot. Where several extensions share a type, the most common one is
+// chosen as canonical: image/jpeg maps back to "jpg", text/plain to "txt", and
+// application/javascript to "js". Because the table also records alias types
+// such as text/javascript and image/vnd.microsoft.icon, those resolve to the
+// same canonical extensions as their primaries.
+//
+// Edge cases follow a consistent rule: every function returns a boolean second
+// value that is false when nothing is known. An empty string, an extension that
+// is not in the table, or a MIME type with no known extension yields ("",
+// false) rather than a guess, so callers can distinguish "unknown" from a real
+// answer. Compared with the Node original the API surface is adapted to Go —
+// results are (value, ok) pairs instead of a value-or-false union, and the
+// bundled type table is a fixed curated subset rather than the full generated
+// mime-db — but the lookup semantics, charset rules and canonical extension
+// choices mirror mime-types.
 package mimetypes
 
 import (

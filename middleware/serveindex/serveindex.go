@@ -1,7 +1,47 @@
-// Package serveindex provides middleware that renders an HTML directory
-// listing for requests that resolve to a directory beneath a configured root.
-// Requests that do not map to a directory fall through to the next handler,
-// making it easy to combine with a static file server.
+// Package serveindex provides middleware that renders an HTML directory listing
+// for requests that resolve to a directory beneath a configured root. It is the
+// express framework's Go analogue of the Node connect/express serve-index
+// middleware, which produces the familiar "Index of /path" pages, reduced here
+// to a compact, dependency-free HTML renderer built on the standard library's
+// os.ReadDir and html.EscapeString.
+//
+// Reach for this middleware to expose a browsable view of a directory tree —
+// a downloads area, a build-artifact folder, static documentation, or a quick
+// file share — where users benefit from clickable links to sub-directories and
+// files. It is designed to sit next to a static file server: serveindex renders
+// the folder pages while the file server delivers the actual file contents, so
+// the two together reproduce the classic auto-index behaviour of a plain web
+// server.
+//
+// Operationally the middleware is typically mounted before a static handler. It
+// acts only on GET and HEAD requests; any other method calls next() immediately.
+// For an eligible request it takes req.Path(), cleans it, and joins it onto the
+// cleaned Options.Root, then confirms the result is still contained within Root
+// before touching the filesystem. It calls os.Stat on the resolved path and
+// proceeds only when the target exists and is a directory; on success it reads
+// the entries, sets a "text/html; charset=utf-8" Content-Type, and writes the
+// rendered listing via res.Send. In every other case — wrong method, path
+// escaping the root, stat error, a non-directory target, or a read error — it
+// calls next() and lets the request fall through to the next handler.
+//
+// The rendered page lists directories before files, each group sorted by name,
+// and links directories with a trailing slash. Every path that is not the root
+// gets a "../" parent link, and all displayed names and hrefs are passed through
+// html.EscapeString so entry names cannot inject markup into the page. Path
+// traversal is contained defensively: the joined path is checked against Root
+// with an os.PathSeparator-aware prefix test, so requests such as /../etc are
+// rejected and fall through rather than escaping the configured root. Because a
+// listing is written with res.Send, serveindex short-circuits the chain only on
+// the success path; the fall-through cases leave the response entirely to
+// downstream handlers.
+//
+// Compared with the Node serve-index original, this port is deliberately
+// minimal. There is a single Option, Root; there is no support for the
+// alternative JSON or plain-text views, no pluggable HTML/stylesheet templates,
+// no icons, file sizes, or modification-time columns, no hidden-file filtering
+// or custom sort options, and no ETag/caching negotiation. It renders one plain,
+// escaped HTML listing and otherwise gets out of the way, leaving file delivery,
+// access control, and richer presentation to other middleware.
 package serveindex
 
 import (

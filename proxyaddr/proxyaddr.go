@@ -1,12 +1,49 @@
 // Package proxyaddr determines the real client address of a request that has
 // passed through one or more trusted reverse proxies. It is a Go port of the
-// npm module "proxy-addr".
+// npm module "proxy-addr", the same logic Express uses to implement its
+// "trust proxy" setting and the req.ip / req.ips accessors.
+//
+// When an application sits behind a load balancer, CDN, or reverse proxy, the
+// socket's remote address is the address of the nearest proxy rather than the
+// end user. Each hop is expected to append the address it saw to the
+// X-Forwarded-For header, producing a left-to-right list that runs from the
+// original client through every intermediary. Because any of those values can
+// be forged by a client, they can only be trusted up to the point where the
+// chain leaves infrastructure you control. This package encodes that decision:
+// given the socket address, the header, and a predicate describing which hops
+// are trusted, it returns the closest address that is not itself a trusted
+// proxy.
 //
 // The forwarded chain is derived from the socket remote address plus the
 // X-Forwarded-For header, in the same reverse ordering used by the "forwarded"
-// module (socket address first, then header entries from rightmost to
-// leftmost). Starting from the socket address, the chain is walked while each
-// address is trusted; the first untrusted address is the real client address.
+// module: the socket address comes first, followed by the header entries read
+// from rightmost (nearest proxy) to leftmost (original client). Starting from
+// the socket address, the chain is walked while each address is trusted; the
+// first untrusted address is the real client address. If every address in the
+// chain is trusted, the topmost (leftmost header) address is returned. All
+// returns that full ordered chain, ProxyAddr returns the single resolved
+// client address, and All combined with a trust predicate lets callers build
+// the equivalent of Express's req.ips.
+//
+// The trust predicate is a func(addr string, i int) bool that receives each
+// candidate address and its index in the chain. Callers may supply arbitrary
+// logic, but Compile builds a predicate from a list of trusted CIDR strings,
+// bare IP addresses (treated as single-host /32 or /128 ranges), and the named
+// presets recognized by proxy-addr. The presets are "loopback"
+// (127.0.0.1/8 and ::1/128), "linklocal" (169.254.0.0/16 and fe80::/10), and
+// "uniquelocal" (the RFC 1918 private IPv4 blocks 10.0.0.0/8, 172.16.0.0/12,
+// 192.168.0.0/16 plus the IPv6 unique-local block fc00::/7). Preset names are
+// matched case-insensitively.
+//
+// Edge cases follow the Node semantics closely. Addresses may carry a port
+// (including bracketed IPv6 literals such as "[::1]:8080"); the port is
+// stripped before comparison. An empty X-Forwarded-For yields a chain of just
+// the socket address. Compile returns an error for an empty trust value or any
+// entry that is neither a preset nor a valid CIDR/IP, and the predicate it
+// returns reports false for addresses that fail to parse rather than treating
+// them as trusted. The chief parity gap versus the JavaScript original is that
+// this port operates on the raw remote-address and header strings a Go handler
+// already has, rather than on a Node request object.
 package proxyaddr
 
 import (

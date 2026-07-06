@@ -1,6 +1,46 @@
 // Package contentdisposition creates and parses HTTP Content-Disposition
-// headers. It is a port of the npm content-disposition package using only
-// the Go standard library.
+// headers. It is a port of the npm content-disposition package using only the
+// Go standard library, and it exposes the two operations that package offers:
+// Format builds a header value from a filename, and Parse decodes a header
+// value back into its type and parameters.
+//
+// The Content-Disposition header tells a client how a response body should be
+// handled: "inline" to display it in place, or "attachment" to save it, most
+// often under a suggested filename. You use Format on the server side when
+// streaming a download so the browser offers a sensible "Save As" name, and you
+// use Parse on the client side, or in multipart/form-data handling, to recover
+// the disposition type and filename a peer sent.
+//
+// Format is careful about non-ASCII filenames because a bare filename parameter
+// may only carry ASCII. When the name is pure ASCII it emits a single quoted
+// filename parameter, escaping embedded quotes and backslashes. When the name
+// contains bytes above 0x7f it additionally emits an RFC 5987 filename*
+// parameter: the value is prefixed with "UTF-8”" and every byte outside the
+// RFC 5987 attr-char set is percent-encoded with lower-case hex. By default a
+// legacy filename parameter is emitted alongside it as an ASCII fallback, built
+// by replacing each non-ASCII byte with '?'; WithFallback(false) suppresses
+// that fallback, and WithType selects the disposition type (default
+// "attachment").
+//
+// Parse splits the header on unquoted semicolons, lower-cases the disposition
+// type and each parameter name, and unescapes quoted-string values. A
+// parameter whose name ends in "*" is treated as an RFC 5987 ext-value and
+// decoded from its charset'lang'percent-encoded form; only the "utf-8" and
+// "iso-8859-1" charsets are accepted and any other charset, or a malformed
+// percent escape, produces an error. When both a filename and a filename*
+// parameter are present the decoded extended value wins and is stored under the
+// "filename" key, matching the precedence browsers apply. An empty or
+// whitespace-only header is an error, while a header with only a type (for
+// example "inline") parses to that type with an empty filename.
+//
+// Parity with the Node original is close for the common download and upload
+// cases: the Format output for ASCII and UTF-8 filenames matches
+// content-disposition, and Parse recovers the same type, filename, and
+// parameter map. The differences are deliberate simplifications. This port does
+// not perform the library's full ISO-8859-1 to UTF-8 transcoding of legacy
+// values, it does not reproduce every validation error message verbatim, and
+// it decodes rather than aggressively rejecting unusual-but-parseable inputs,
+// so it favors round-trip fidelity over byte-for-byte error parity.
 package contentdisposition
 
 import (

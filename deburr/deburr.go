@@ -1,8 +1,44 @@
-// Package deburr provides a faithful port of lodash's `deburr` utility.
+// Package deburr provides a faithful port of lodash's deburr utility, built on
+// only the Go standard library. It exposes the single Deburr function, which
+// converts accented Latin letters to their basic ASCII equivalents and removes
+// combining diacritical marks, so that text such as "déjà vu" becomes "deja vu"
+// and "Crème Brûlée" becomes "Creme Brulee".
 //
-// It converts Latin-1 Supplement and Latin Extended-A letters to their
-// basic Latin equivalents and strips combining diacritical marks, so that
-// accented text such as "déjà vu" becomes "deja vu".
+// Deburring is most useful as a normalization step ahead of slugging, searching,
+// sorting, or generating identifiers. Turning "Málaga" into "Malaga" lets a URL
+// slug stay ASCII, lets a case-insensitive search match regardless of the
+// accents a user typed, and lets names sort in a predictable order without
+// pulling in a full Unicode collation library. It is a lossy, presentation-level
+// transform, not a transliteration engine: it approximates the Latin letter a
+// reader would recognize rather than attempting a linguistically correct
+// romanization.
+//
+// The algorithm walks the input rune by rune and applies two tables borrowed
+// directly from lodash. The first is a fixed map from the Latin-1 Supplement and
+// Latin Extended-A blocks to basic Latin: single letters map to a single letter
+// (é to e, ñ to n), and certain letters expand to a short digraph (æ to ae, ß to
+// ss, Þ to Th, Œ to Oe, and so on), preserving the case of the original. The
+// second is a set of combining-mark ranges — the Combining Diacritical Marks
+// block and its Extended, Supplement, for-Symbols, and Half-Marks siblings —
+// whose runes are dropped so that a base letter followed by a standalone
+// combining accent survives as just the base letter.
+//
+// The edge cases follow from that design. A rune that is neither a known
+// accented letter nor a combining mark is passed through unchanged, so ASCII
+// text, digits, punctuation, emoji, and non-Latin scripts (Greek, Cyrillic, CJK)
+// are all left exactly as they were. The empty string returns the empty string.
+// Because the digraph expansions can make the result longer than the input, the
+// output length is not tied to the input length even though the builder is
+// pre-sized from it. Both precomposed characters (a single é code point) and
+// decomposed sequences (e followed by a combining acute accent) are handled: the
+// former via the letter table, the latter via combining-mark removal.
+//
+// Parity with the Node original is intentional and close: the letter-mapping
+// table and the combining-mark ranges are the same ones lodash's deburr uses, so
+// the ASCII output for Latin-1 and Latin Extended-A input matches. The
+// differences are purely idiomatic — Deburr takes and returns a Go string and
+// iterates runes rather than operating on a JavaScript string, and it relies on
+// Go's native UTF-8 handling instead of a regular-expression replace.
 package deburr
 
 import "strings"

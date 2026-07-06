@@ -1,6 +1,40 @@
 // Package fresh implements HTTP response freshness testing, a port of the npm
 // "fresh" package. It determines whether a cached response is still fresh
-// relative to a request's conditional headers.
+// relative to a request's conditional headers, and is the same primitive that
+// Express uses to answer 304 Not Modified requests.
+//
+// Use this package when a server holds a representation of a resource together
+// with its validators (an ETag and/or a Last-Modified time) and needs to decide
+// whether the client's cached copy is still current. When Fresh reports true,
+// the caller can skip sending the body and respond with 304 Not Modified;
+// when it reports false, the resource is considered stale and the full response
+// should be sent. This mirrors the conditional-request handling described in
+// RFC 7232.
+//
+// Freshness is evaluated from two request headers, If-None-Match and
+// If-Modified-Since, checked against the response's ETag and Last-Modified
+// headers. An unconditional request (neither If-None-Match nor
+// If-Modified-Since present) is always treated as stale, because there is
+// nothing to validate against. A Cache-Control: no-cache directive on the
+// request forces revalidation and is likewise reported as stale, regardless of
+// the validators.
+//
+// When both conditional headers are present, both must pass for the response to
+// be fresh. If-None-Match succeeds when the response ETag is listed in the
+// header, using a weak comparison in which a leading "W/" prefix is ignored; a
+// bare "*" matches any ETag. A missing response ETag fails the check unless the
+// request sent "*". If-Modified-Since succeeds when the response's
+// Last-Modified time is not strictly after the requested time; a missing
+// Last-Modified, or a date in either header that cannot be parsed in any of the
+// standard HTTP date formats, fails the check.
+//
+// The behavior tracks the npm "fresh" module closely, including the "*"
+// handling, weak ETag comparison, no-cache short-circuit, and the rule that a
+// request with no conditional headers is stale. The signature is adapted to Go:
+// rather than accepting two plain header maps by convention, Fresh takes two
+// http.Header values, and nil headers are tolerated and treated as empty. Date
+// parsing accepts the RFC 1123, RFC 1123 with numeric zone, RFC 850, and ANSI C
+// asctime formats in addition to the preferred http.TimeFormat.
 package fresh
 
 import (

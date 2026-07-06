@@ -1,4 +1,48 @@
-// Package otpauth builds and parses otpauth:// key URIs.
+// Package otpauth builds and parses otpauth:// key URIs, a stdlib-only Go port
+// of the URI portion of the npm "otpauth" library
+// (https://www.npmjs.com/package/otpauth). One-time passwords are the short
+// numeric codes used for two-factor authentication; the otpauth:// URI is the
+// de-facto standard, originally defined by Google Authenticator, for handing a
+// shared secret and its parameters to an authenticator app, most commonly by
+// encoding the URI in a QR code that the user scans during account setup.
+//
+// This package concerns itself with the transport format — constructing a
+// correct otpauth:// URI from a Config and parsing one back into a Config. It
+// covers both one-time-password families defined by the standard: HOTP (HMAC
+// based one-time passwords, RFC 4226), which are counter-based and advance each
+// time a code is consumed, and TOTP (time-based one-time passwords, RFC 6238),
+// which derive the code from the current time divided into fixed-length steps.
+// The Type field selects between them, defaulting to "totp" when left empty.
+//
+// A URI has the shape otpauth://TYPE/LABEL?PARAMETERS. The LABEL identifies the
+// account and is conventionally "Issuer:Account" (for example
+// "ACME Co:alice@example.com"); URL builds this from the Issuer and Account
+// fields, and Parse splits it back apart, also honoring an explicit issuer query
+// parameter which takes precedence when present. The query string carries the
+// secret plus optional metadata: secret (a base32-encoded shared key such as
+// "JBSWY3DPEHPK3PXP"), issuer, algorithm (SHA1, SHA256 or SHA512), digits (the
+// code length, typically 6), and either period (the TOTP time step in seconds,
+// typically 30) for TOTP or counter (the initial HOTP counter) for HOTP.
+//
+// URL emits parameters in a fixed, spec-friendly order and percent-encodes them
+// so that spaces appear as %20 rather than "+", matching the otpauth
+// specification and the expectations of common authenticator apps; a period is
+// only written for TOTP and a counter only for HOTP. Parse is tolerant on
+// input: it accepts any parameter ordering, treats a wrong scheme as an error,
+// returns descriptive errors when digits, period or counter are not valid
+// integers, and leaves optional fields at their zero values when absent. URL
+// followed by Parse round-trips the meaningful fields, as the package tests
+// demonstrate.
+//
+// Parity with the Node library is intentionally scoped to the URI layer: this
+// port generates and reads otpauth:// URIs and their parameters but does not
+// itself compute HOTP/TOTP codes or validate secrets, whereas the full npm
+// otpauth module also produces and verifies the numeric passwords. Keeping the
+// dependency surface to the standard library (net/url, strconv, strings) makes
+// the package a small, focused helper for the common task of generating an
+// enrollment URI for a QR code, or extracting the configured parameters from a
+// URI a client supplied. Callers that need the actual six-digit code can pair
+// the parsed Config with a standard HOTP/TOTP implementation.
 package otpauth
 
 import (

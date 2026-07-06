@@ -1,6 +1,42 @@
-// Package statuses maps between HTTP status codes and their reason phrases,
-// modeled on the npm "statuses" package. It also provides helpers for
-// classifying status codes (redirects, retriable, empty).
+// Package statuses maps between HTTP status codes and their standard reason
+// phrases and classifies codes by behavior. It is a Go port of the npm
+// "statuses" package, reimplemented using only the Go standard library. Where
+// the Node original exposes a callable module plus lookup tables, this package
+// exposes the same capabilities as ordinary functions and returns Go-idiomatic
+// values and errors.
+//
+// A web framework or HTTP client reaches for this package whenever it needs the
+// canonical text for a numeric status code (for example, to build a default
+// response body or a log line reading "404 Not Found"), or the reverse: to turn
+// a human-written phrase such as "Not Found" back into the number 404. It also
+// answers the three behavioral questions that middleware most often asks about a
+// status: is it a redirect, may the request be retried, and must the response be
+// sent without a body.
+//
+// Internally the package is backed by a code-to-message map covering the common
+// registered codes in the 100-511 range and a lazily built, lower-cased
+// message-to-code map for the reverse direction. Message performs a direct map
+// lookup and returns the empty string for an unknown code. Code trims and
+// lower-cases its input before looking it up, so matching is case-insensitive
+// and tolerant of surrounding whitespace; an unknown phrase yields a non-nil
+// error rather than a zero code that could be mistaken for a valid status.
+//
+// Three small sets drive classification. IsRedirect reports true for the 3xx
+// codes that carry a Location header and cause the client to follow it (300,
+// 301, 302, 303, 305, 307, 308); note that 304 Not Modified is deliberately
+// excluded because it is a cache-validation response, not a redirect. IsRetry
+// reports true for the gateway-family codes 502, 503, and 504, which typically
+// represent a transient upstream failure that a client may safely retry. IsEmpty
+// reports true for 204, 205, and 304, whose responses must never include a
+// message body. These sets mirror the classification tables of the npm original.
+//
+// Codes returns every known status code sorted in ascending order, which is
+// convenient for iterating over the full table (for instance to validate a
+// round trip between Message and Code). Compared with the Node package, the data
+// tables and classification rules are kept in parity, while the API surface is
+// adapted to Go conventions: functions instead of a callable with attached
+// properties, an (int, error) return from Code instead of a thrown exception,
+// and a plain []int from Codes instead of an array of strings.
 package statuses
 
 import (

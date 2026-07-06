@@ -1,6 +1,51 @@
-// Package math provides generic ports of the math and number utility functions
-// found in the JavaScript library lodash. Every function is written against the
-// Number constraint and depends only on the standard library.
+// Package math ports the "Math" and "Number" category functions of the npm
+// lodash library to Go, implemented with generics and depending only on the
+// standard library. It provides the aggregation helpers (Sum, SumBy, Mean,
+// MeanBy, Max, Min, MaxBy, MinBy), the arithmetic wrappers (Add, Subtract,
+// Multiply, Divide), the rounding helpers (Round, Ceil, Floor), the range and
+// bounds helpers (Clamp, InRange), and the random helpers (Random, RandomInt)
+// that lodash documents under _.sum, _.mean, _.max, _.clamp, _.round and friends.
+//
+// Use this package whenever Go code needs the small, familiar numeric utilities
+// that a JavaScript or Node developer would reach for out of lodash: totalling or
+// averaging a slice, finding the extreme element of a collection by a derived
+// key, clamping a value into a range, or rounding to a given number of decimal
+// places. Because the API is generic over a Number constraint rather than fixed
+// to float64, the aggregation and arithmetic helpers preserve the caller's own
+// integer or floating-point type (and named types derived from them) instead of
+// forcing everything through float64 and back.
+//
+// The algorithms are deliberately simple and allocation-free. Sum and SumBy
+// fold with a running accumulator; Mean and MeanBy divide the sum by the length
+// as a float64; Max, Min, MaxBy and MinBy make a single pass tracking the best
+// element seen so far; and the "By" variants apply an iteratee to project each
+// element onto a comparable Number before comparing. The rounding helpers scale
+// by a power of ten, apply floor, ceil or JavaScript-style half-up rounding, and
+// rescale, matching lodash's createRound behaviour for typical precisions
+// including negative ones that round to the left of the decimal point. Random and
+// RandomInt take an injected source of randomness (a func returning a value in
+// [0, 1)) so results stay deterministic and testable, and both accept their
+// bounds in either order.
+//
+// Empty and degenerate inputs follow lodash's conventions. Sum and SumBy over an
+// empty slice return the zero value of the accumulator; Mean and MeanBy over an
+// empty collection return NaN, matching lodash's use of NaN for an undefined
+// average; and Max, Min, MaxBy and MinBy over an empty slice return the zero
+// value of the element type, standing in for the undefined that JavaScript would
+// yield. Round, Ceil and Floor pass NaN and the infinities through unchanged.
+// Divide performs an ordinary Go division, so dividing an integer type by zero
+// panics while dividing a float type yields +Inf, -Inf or NaN, and Clamp and
+// InRange transparently swap their bounds when supplied high-to-low.
+//
+// Parity with Node lodash is high for the numeric core, with two Go-flavoured
+// differences worth noting. First, lodash returns undefined for the extreme of an
+// empty collection and for a few other missing-value cases, whereas Go has no
+// undefined, so these helpers return the type's zero value instead; callers who
+// must distinguish "no elements" from "the maximum happens to be zero" should
+// guard on len before calling. Second, rounding is performed in float64 and is
+// therefore subject to the same binary floating-point representation limits as
+// lodash's own _.round, so extreme magnitudes or precisions may differ in the
+// last ulp; for everyday financial-style rounding the results match.
 package math
 
 import "math"

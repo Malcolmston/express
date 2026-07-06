@@ -1,11 +1,42 @@
 // Package wordwrap wraps text to a fixed width, modeled on the npm "word-wrap"
-// package.
+// package. It is a standard-library-only Go port that reflows a paragraph of
+// text so that no output line exceeds a chosen width, which is useful for
+// rendering help text, log messages, email bodies, terminal output, and any
+// other place where a long run of prose must fit inside a bounded column.
 //
-// Text is broken on whitespace so that no line exceeds Width characters
-// (measured excluding the indent). Each output line is prefixed with Indent.
-// Existing newlines in the input are preserved as paragraph breaks. When Cut is
-// true, words longer than Width are broken into Width-sized pieces instead of
-// overflowing.
+// Wrapping is greedy and whitespace-based. The input is split into words on
+// runs of whitespace, and words are packed onto the current line one at a time
+// until adding the next word (plus the single space that would join it) would
+// push the line past Width; at that point the current line is emitted and the
+// word starts a new line. Width is measured in runes and counts only the text,
+// excluding the per-line Indent, so multibyte and accented characters count as
+// one column each and the indent does not eat into the usable width.
+//
+// Line structure is controlled by three fields. Indent is prefixed to every
+// output line, which makes it easy to produce block-quoted or nested text.
+// Newline is the separator placed between lines, defaulting to "\n". Existing
+// newlines in the input are treated as hard paragraph breaks: the text is split
+// on "\n" first and each paragraph is wrapped independently, so intentional line
+// breaks in the source survive while over-long lines within a paragraph are
+// reflowed. A blank paragraph is preserved as an indented empty line.
+//
+// Long words are handled by the Cut option. Normally a single word longer than
+// Width is left intact and simply overflows its line, because breaking a word
+// changes its meaning; when Cut is true such words are instead chopped into
+// Width-sized pieces so the hard width limit is never exceeded. The TrimTrailing
+// option removes trailing spaces and tabs from every emitted line, which is
+// handy when the wrapped text is compared byte-for-byte or embedded where
+// trailing whitespace is undesirable.
+//
+// Configuration is via the Options struct, and the zero value is usable: a Width
+// of zero or less is treated as DefaultWidth (50) and an empty Newline as
+// DefaultNewline ("\n"). Note the one subtlety with defaults — a zero-value
+// Options has an empty Indent, whereas the npm library defaults to a two-space
+// indent, so NewOptions is provided to build an Options carrying all three
+// package defaults (Width 50, Indent two spaces, Newline "\n"). Parity with the
+// Node original covers the greedy whitespace wrapping, indent, newline, trailing
+// trim, and cut behavior; callers wanting the JavaScript defaults exactly should
+// start from NewOptions rather than a bare struct literal.
 package wordwrap
 
 import (

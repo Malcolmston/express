@@ -1,5 +1,44 @@
 // Package dotenv parses .env style configuration content and loads it into the
-// process environment, mirroring the behavior of the npm "dotenv" library.
+// process environment, mirroring the behavior of the npm "dotenv" library. It
+// exposes Parse and Bytes for turning raw .env content into a map of key/value
+// pairs, and Load and LoadOverride for reading a file from disk and applying it
+// to the running process via os.Setenv.
+//
+// The classic use case is keeping configuration out of source code: secrets,
+// connection strings, feature flags, and per-environment tunables live in a
+// local .env file that is not committed, and the application reads them at
+// startup. Parse and Bytes are also handy on their own when you have .env
+// formatted text from some other source (an embedded asset, a network response,
+// a test fixture) and want the parsed values without touching the environment.
+//
+// Parsing is line oriented. Each line is trimmed and then classified: blank
+// lines and lines whose first non-space character is '#' are skipped as comments;
+// a leading "export " (or "export\t") prefix is stripped so shell-sourceable
+// files work; and the remainder is split on the first '=' into a key and a raw
+// value. A line with no '=' or with an empty key is ignored rather than being
+// treated as an error, so malformed lines are simply dropped. The value is then
+// interpreted by its first character.
+//
+// Value handling follows dotenv's conventions. A single-quoted value is taken
+// literally up to the closing quote with no escape or variable expansion, so
+// backslashes and dollar signs survive verbatim. A double-quoted value is read
+// up to the closing quote and then has its backslash escapes expanded: \n, \t,
+// \r, \\, and \" become their control-character or literal equivalents, while any
+// other escape keeps the backslash. An unquoted value has any trailing "#"
+// comment removed and is then whitespace-trimmed, so surrounding spaces do not
+// leak in but interior spaces are preserved when quoted. An empty right-hand
+// side yields an empty string, and a value with no closing quote is accepted up
+// to end of line.
+//
+// Load and LoadOverride differ only in precedence. Load never overwrites a
+// variable that is already present in the environment, matching dotenv's default
+// of treating the real environment as authoritative; LoadOverride writes every
+// parsed variable unconditionally. Both return any error from opening the file,
+// from the scanner, or from os.Setenv, and a missing file surfaces the
+// underlying os.Open error. Relative to the Node original this port implements
+// the same comment, quote, escape, and export handling, but it does not perform
+// ${VAR} variable interpolation and it does not return dotenv's { parsed, error }
+// result object; it returns an ordinary Go map and error instead.
 package dotenv
 
 import (

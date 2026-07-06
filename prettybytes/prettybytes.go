@@ -1,8 +1,40 @@
-// Package prettybytes converts a number of bytes to a human readable string.
+// Package prettybytes converts a number of bytes into a compact, human readable
+// string such as "1.34 kB" or "1.5 MiB". It is a faithful port of the npm package
+// "pretty-bytes", reproducing its unit tables, rounding and formatting rules using
+// only the Go standard library (math, strconv and strings).
 //
-// It is a faithful port of the npm package "pretty-bytes". By default it uses
-// SI units (base 1000): B, kB, MB, GB, TB, PB, EB, ZB, YB and renders numbers
-// with up to three significant digits (mirroring JavaScript's toPrecision(3)).
+// Raw byte counts are hard for people to read: "1337000000" conveys far less at a
+// glance than "1.34 GB". This package is what you use to render file sizes,
+// transfer amounts, memory footprints and similar quantities in logs, CLIs and UIs.
+// The default entry point PrettyBytes takes a float64 count and returns the SI
+// (base-1000) rendering; PrettyBytesOpts takes the same number plus an Options
+// struct for finer control.
+//
+// By default the package uses SI units (base 1000): B, kB, MB, GB, TB, PB, EB, ZB,
+// YB, and formats the mantissa with up to three significant digits, mirroring
+// JavaScript's Number.prototype.toPrecision(3) followed by toLocaleString — so
+// trailing zeros are stripped ("1 kB", not "1.00 kB") and the integer part is
+// grouped with commas ("1,000 kB"). The correct unit is chosen by taking the
+// base-1000 (or base-1024) logarithm of the magnitude and then nudging the
+// exponent up or down to correct for floating-point error at the boundaries, so
+// values right at a power of the base land on the expected unit.
+//
+// Options selects alternative renderings. Bits switches to bit units (b, kbit,
+// Mbit, ...). Binary switches to base-1024 IEC units (KiB, MiB, ... or kibit,
+// Mibit, ... when combined with Bits). Signed prints a leading "+" on positive
+// values and a leading space on zero (" 0 B") so columns of signed values align.
+// MinimumFractionDigits and MaximumFractionDigits (both *int, nil to leave unset)
+// override the default three-significant-digit behaviour with fixed
+// fraction-digit bounds resolved the same way Intl.NumberFormat resolves them.
+//
+// Edge cases and Node parity: zero renders as "0 B" (or " 0 B" when Signed).
+// Negative inputs keep their sign and are formatted by magnitude, so -1337 becomes
+// "-1.34 kB" regardless of the Signed option. Values below 1 are shown in the base
+// unit ("0.4 B"). NaN and the infinities are passed straight through Go's float
+// formatter rather than being bucketed into a unit. Magnitudes beyond the largest
+// tabulated unit are clamped to that unit (YB / Ybit / YiB / Yibit). These
+// behaviours track pretty-bytes; the numeric output is intended to match it for
+// the shared inputs.
 package prettybytes
 
 import (

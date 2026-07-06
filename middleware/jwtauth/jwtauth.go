@@ -1,6 +1,51 @@
-// Package jwtauth provides middleware that verifies HS256-signed JSON Web
-// Tokens supplied via the Authorization header. It depends only on the
-// standard library.
+// Package jwtauth provides Express middleware that verifies HS256-signed JSON
+// Web Tokens supplied via the Authorization header, gating access to protected
+// routes. It fills the same role as the Node "express-jwt" middleware (commonly
+// paired with "jsonwebtoken"), but is a deliberately small, stdlib-only
+// reimplementation: HMAC-SHA256 verification is done with crypto/hmac and
+// crypto/sha256, and JSON decoding with encoding/json, so it pulls in no
+// third-party dependencies.
+//
+// Use this middleware to protect API endpoints with stateless bearer-token
+// authentication. A client obtains an HS256 JWT elsewhere (a login endpoint,
+// an identity provider) and presents it on each request as
+// "Authorization: Bearer <token>"; the middleware verifies the signature and
+// exposes the decoded claims to downstream handlers. It is appropriate when the
+// signer and verifier share a symmetric secret. It does not mint tokens — only
+// verify them — and it only supports the HS256 algorithm, so RS256/ES256 or
+// asymmetric-key setups are out of scope.
+//
+// The handler is meant to run before the handlers it protects, either mounted
+// globally with app.Use or scoped to a protected router. On each request it
+// reads the Authorization header via req.Get, extracts the Bearer token
+// (matching the "Bearer " prefix case-insensitively and trimming surrounding
+// space), and verifies it with Verify. On success it stores the decoded Claims
+// on the request via req.Set under the configured key (default "claims"), so a
+// later handler can retrieve them with req.Value(key), and then calls next() to
+// continue. On any failure it short-circuits: it sets the WWW-Authenticate:
+// Bearer header and responds with 401 Unauthorized, without calling next(), so
+// no protected handler runs.
+//
+// Verification is strict. A token must have exactly three dot-separated
+// segments; the header must declare "alg":"HS256"; the HMAC-SHA256 signature
+// over "header.payload" must match using a constant-time hmac.Equal comparison;
+// and segments are base64url-decoded tolerating missing padding. If the payload
+// contains an "exp" claim that decodes as a JSON number, the token is rejected
+// once the current time reaches or passes that Unix timestamp. Missing header,
+// wrong prefix, empty token, malformed base64, non-HS256 algorithm, bad
+// signature, unparseable claims, or an elapsed exp all resolve to a 401. Note
+// that "exp" is the only registered claim checked — nbf, iat, iss, aud, and
+// friends are decoded into the claims map but not validated — and any error is
+// collapsed into the same generic 401 rather than being surfaced to the client.
+//
+// Compared to the Node express-jwt original, this port keeps the essential
+// contract — verify a bearer JWT and attach its claims to the request — but is
+// intentionally minimal. It supports only HS256 (no algorithms allowlist,
+// asymmetric keys, or JWKS), validates only exp (no nbf/aud/iss options), always
+// requires a token (there is no "credentialsRequired: false" optional mode),
+// exposes claims under a request key of your choice rather than req.auth/req.user,
+// and reports failures as a fixed 401 "Unauthorized" instead of forwarding a
+// typed error to an error-handling middleware.
 package jwtauth
 
 import (

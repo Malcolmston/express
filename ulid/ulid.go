@@ -1,6 +1,45 @@
-// Package ulid generates Universally Unique Lexicographically Sortable
-// Identifiers (ULIDs), a Go port of the npm "ulid" package. Ids embed a
-// millisecond timestamp and sort lexicographically by creation time.
+// Package ulid generates and decodes Universally Unique Lexicographically
+// Sortable Identifiers (ULIDs). It is a standard-library-only Go port of the
+// npm "ulid" package. A ULID packs a millisecond-precision timestamp together
+// with random entropy into a single 128-bit value that is both globally unique
+// and naturally ordered by creation time, giving you the k-sortability of an
+// auto-increment key without a central coordinator.
+//
+// The 128 bits are split into two fields: the high 48 bits hold a Unix
+// timestamp in milliseconds, and the low 80 bits hold random entropy. New reads
+// those 10 entropy bytes from crypto/rand, while NewWithEntropy lets the caller
+// supply them for deterministic or reproducible generation. The timestamp field
+// is 48 bits wide, so New/NewWithEntropy reject any ms value greater than
+// 2^48-1 (roughly the year 10889), and the entropy slice must be exactly ten
+// bytes long.
+//
+// The 16 raw bytes are rendered as a fixed 26-character string using Crockford
+// base32 (Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"), which omits the
+// ambiguous letters I, L, O, and U. The first ten characters encode the
+// timestamp and the remaining sixteen encode the entropy; because base32 does
+// not divide 128 evenly, the leading character carries only the top three bits,
+// so a valid ULID never begins with a digit greater than 7. Decode is
+// case-insensitive and also accepts the Crockford aliases i/I and l/L for 1 and
+// o/O for 0.
+//
+// Sortability is the defining property. Since the timestamp occupies the most
+// significant bits and base32 preserves byte order, ULIDs generated at
+// different milliseconds sort correctly both as raw bytes and as ASCII strings
+// (string comparison and time order agree). Within a single millisecond,
+// ordering is determined by the random entropy and is therefore arbitrary
+// unless the caller supplies monotonically increasing entropy. Note that,
+// unlike the npm package's optional monotonicFactory, this port does not
+// implement automatic monotonic entropy bumping: two ULIDs created in the same
+// millisecond via New have independent random tails and no guaranteed relative
+// order.
+//
+// Decode reverses the encoding into the raw [16]byte, and Timestamp extracts
+// just the embedded millisecond value without a full decode round trip.
+// Compared with the Node package, the binary layout, Crockford alphabet, and
+// 26-character canonical form are identical, so a ULID string produced here can
+// be decoded by the JavaScript library and vice versa; the differences are
+// idiomatic Go error returns and the absence of the JS monotonic and
+// pseudo-random PRNG helpers.
 package ulid
 
 import (

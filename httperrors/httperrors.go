@@ -1,7 +1,46 @@
 // Package httperrors provides an HTTP-aware error type modeled on the
-// npm "http-errors" package. Errors carry an HTTP status code, a message,
-// and an "expose" flag indicating whether the message is safe to send to
-// clients.
+// npm "http-errors" package, the module used internally by Express and Koa to
+// build the errors that middleware turns into HTTP responses. Errors carry an
+// HTTP status code, a message, and an "expose" flag indicating whether the
+// message is safe to send to clients, so a single value can flow from the point
+// of failure all the way to the response writer while carrying everything the
+// handler needs to render it.
+//
+// The Node http-errors package became the de facto standard because it lets
+// application code fail with intent: instead of returning a bare error and
+// separately deciding on a status code, a handler throws createError(404) or
+// new NotFound() and the framework's error middleware reads the status straight
+// off the error. This port brings that ergonomics to Go's error model. Error
+// implements the standard error interface, so a *Error can be returned anywhere
+// an error is expected, passed through errors.Is/As-style checks, and later
+// recognized with IsHTTPError to recover its status and expose flag when
+// writing the response.
+//
+// Construct errors either generically with New(status, msg) or with one of the
+// named constructors such as BadRequest, NotFound or InternalServerError, which
+// simply call New with the corresponding net/http status constant. When the
+// message is empty, New substitutes the standard status text for the code
+// (via http.StatusText), so New(404, "") yields the message "Not Found". This
+// matches http-errors, where omitting a message falls back to the canonical
+// reason phrase, and it means the named constructors always produce a
+// non-empty, human-readable message even when called with "".
+//
+// The Expose field encodes the security convention at the heart of the original
+// library: client errors are generally safe to describe to the caller, while
+// server errors may contain internal detail that should not leak. Accordingly
+// Expose defaults to true for 4xx status codes and false for 5xx status codes.
+// Callers that want to override this (for example, to hide the message of a
+// deliberately vague 403, or to surface a curated 503 message) can set the
+// field directly on the returned *Error after construction, since it is a plain
+// exported struct.
+//
+// Parity with the Node package is close for the common path but not total. The
+// constructors here cover the widely used 4xx and 5xx codes rather than every
+// status http-errors defines, and this port models the status, message and
+// expose semantics without http-errors' extra conveniences such as attaching
+// arbitrary properties, header maps, or wrapping an existing error's stack.
+// For status codes without a dedicated constructor, call New directly with the
+// numeric code.
 package httperrors
 
 import "net/http"
@@ -13,9 +52,13 @@ import "net/http"
 // expose to clients; by convention it defaults to true for 4xx client
 // errors and false for 5xx server errors.
 type Error struct {
-	Status  int
+	// Status is the HTTP status code associated with the error.
+	Status int
+	// Message is the human-readable error text returned by Error.
 	Message string
-	Expose  bool
+	// Expose reports whether Message is safe to send to clients. It defaults
+	// to true for 4xx status codes and false for 5xx status codes.
+	Expose bool
 }
 
 // Error implements the error interface and returns the message.

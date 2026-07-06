@@ -1,8 +1,40 @@
 // Package metrics provides middleware that records basic request metrics for
 // the express framework: the total number of requests and a breakdown by
-// status class (2xx, 3xx, 4xx, 5xx). The response status is observed through a
-// lightweight ResponseWriter wrapper, and all counters are safe for concurrent
-// use.
+// status class (2xx, 3xx, 4xx, 5xx). It is a minimal, dependency-free analog of
+// Node instrumentation middleware such as express-status-monitor, morgan's
+// counting variants, or a prom-client HTTP collector, but it stays in the
+// standard library and simply accumulates counters in memory rather than
+// exporting a Prometheus endpoint.
+//
+// Use it when you want a cheap, always-on sense of request volume and error
+// ratios — for health dashboards, a debug/admin route, or lightweight alerting on
+// the 5xx count — without pulling in a full metrics stack. It answers "how many
+// requests have we served and how many failed" and nothing more, which is often
+// exactly what a small service needs.
+//
+// Register the handler early with app.Use so it wraps the whole chain. On each
+// request it swaps res.Writer for a lightweight statusWriter, calls next() to run
+// the rest of the chain, then restores the original writer and records the
+// observed status. The statusWriter remembers the first status code written
+// (falling back to 200 OK when a handler writes a body without an explicit
+// WriteHeader), so the recorded class reflects what the client actually received.
+// Because the middleware measures on the way back out, it must sit outside the
+// handlers whose responses you want counted.
+//
+// The counters live on the *Metrics value returned alongside the handler, and
+// they are guarded by a mutex so the middleware is safe under concurrent traffic.
+// Read them with Snapshot, which returns a copy containing "total" plus one entry
+// per status class ("2xx", "3xx", "4xx", "5xx"); status codes below 200 are
+// counted in total but fall into no class bucket. Note the two-value constructor:
+// New returns (express.Handler, *Metrics) — you must keep the *Metrics to observe
+// anything. The counters are process-local and reset when the process restarts;
+// this package does no persistence, sampling, or latency timing.
+//
+// Parity with the Node originals is deliberately partial. It captures the request
+// count and status-class breakdown that those tools expose, but it does not track
+// response-time histograms, per-route labels, in-flight gauges, or a scrape
+// endpoint. If you need Prometheus-style export, layer it on top of Snapshot; this
+// package's contract is just the accumulator and the writer-wrapping middleware.
 package metrics
 
 import (

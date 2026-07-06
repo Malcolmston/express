@@ -1,9 +1,38 @@
 // Package querystringlite is a faithful port of Node.js's built-in querystring
-// module for flat (non-nested) query strings.
+// module for flat (non-nested) query strings. It mirrors the querystring.parse,
+// querystring.stringify, querystring.escape, and querystring.unescape functions
+// that Node exposes for reading and writing application/x-www-form-urlencoded
+// data.
 //
-// Parsing splits on "&" and "=", treats "+" as a space, and percent-decodes
-// keys and values. Stringifying percent-encodes keys and values (encoding
-// spaces as "%20", matching Node) and repeats keys for multi-valued entries.
+// Use this package when you want Node-compatible query-string handling without
+// the nested bracket semantics of the qs package. It treats a query string as a
+// flat multimap: every key maps to the ordered list of values it was given, so
+// repeated keys such as "a=1&a=3" are preserved rather than collapsed. This is
+// the right tool for straightforward form submissions and API query parameters
+// where "a[b]" is just a literal key and not a request to build a nested object.
+//
+// Parsing splits the input on "&" and then on the first "=" in each pair,
+// treats "+" as a space, and percent-decodes both keys and values. A pair with
+// no "=" maps its key to a single empty-string value, and empty pairs produced
+// by leading, trailing, or doubled "&" are skipped. Unlike some parsers, a
+// leading "?" is not stripped, matching Node's querystring.parse, which leaves
+// the "?" as part of the first key.
+//
+// Stringifying is the inverse: keys are emitted in sorted order for
+// deterministic output, multi-valued keys expand to repeated "key=value" pairs,
+// and a key with an empty value list is omitted entirely. Both keys and values
+// are percent-encoded via Escape, which follows encodeURIComponent's unreserved
+// set and encodes spaces as "%20" rather than "+", again matching Node.
+// Unescape is deliberately lenient: a malformed "%XX" sequence is left
+// untouched instead of raising an error, mirroring Node's fallback behavior.
+//
+// For the common case of one value per key, the ParseSingle and StringifySingle
+// convenience wrappers work with map[string]string instead of
+// map[string][]string. The main parity difference from Node is surface shape
+// rather than behavior: Go's static typing means values are exposed as
+// []string (or string) maps instead of the dynamic objects Node returns, and
+// this port omits Node's configurable options such as custom separators,
+// maxKeys limits, and pluggable encode/decode hooks.
 package querystringlite
 
 import (

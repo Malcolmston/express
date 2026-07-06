@@ -1,14 +1,63 @@
 // Package collection is a standalone, dependency-free port of lodash's
-// collection utilities to Go generics. It operates over slices ([]T) and
-// only uses the Go standard library.
+// "Collection" category of functions (https://lodash.com/docs -
+// _.countBy, _.groupBy, _.keyBy, _.partition, _.map, _.filter, _.reduce,
+// _.sortBy, _.orderBy, _.sample, _.shuffle and friends) to Go generics. It
+// operates over Go slices ([]T) and depends only on the Go standard library
+// (cmp, sort, math/rand, crypto/rand), so it can be dropped into any project
+// without pulling in third-party code.
 //
-// The functions here mirror the behavior of the equivalently named lodash
-// functions as faithfully as Go's type system allows. Iteratees are passed as
-// generic Go functions rather than lodash "iteratee shorthands".
+// The package exists to give Go programmers the ergonomic, expression-oriented
+// data-wrangling vocabulary that JavaScript developers reach for by habit. In
+// Node a call such as _.groupBy(users, u => u.role) reads clearly and returns a
+// plain object; the naive Go equivalent is a hand-rolled loop plus a map
+// declaration at every call site. These helpers collapse that boilerplate into
+// a single, type-safe call while remaining allocation-friendly and easy to
+// reason about. Reach for them when porting Express/lodash JavaScript to Go, or
+// simply when you want map/filter/reduce style pipelines without giving up
+// static typing.
 //
-// For the randomized helpers (Sample, SampleSize, Shuffle) an optional
-// *math/rand.Rand may be supplied so results are deterministic in tests. When
-// nil is passed a process-wide generator seeded from crypto/rand is used.
+// Every function that inspects elements does so through an explicit Go closure
+// rather than lodash's "iteratee shorthands" (the string, array and object
+// shorthands such as _.map(users, 'name')): Go has no first-class property
+// paths, so an iteratee is always a func(T) K and a predicate is always a
+// func(T) bool. Iteratees that derive a grouping or sort key (CountBy, KeyBy,
+// GroupBy, SortBy, MinBy, MaxBy, SumBy, MeanBy) constrain K to a comparable or
+// cmp.Ordered type as appropriate; Map and FlatMap are additionally
+// parameterized by an independent result type R so the output slice need not
+// share the input's element type. Predicate-driven functions (Filter, Reject,
+// Find, FindLast, Every, Some, Partition) test truthiness with an ordinary
+// bool. ForEach (and its alias Each) is the one iteratee whose bool is a
+// control signal: returning false stops iteration early, matching lodash's
+// ability to break out of _.forEach by returning false.
+//
+// Ordering and edge cases follow lodash's observable behavior wherever Go
+// allows. All traversals visit elements in slice order, and the functions that
+// preserve position (Filter, Reject, Partition, GroupBy within a group, Map)
+// keep the input's relative order; SortBy and OrderBy are stable, so equal keys
+// retain their original sequence. Empty and nil inputs are handled without
+// panicking: an empty or nil slice has length zero, so Filter/Reject/Map return
+// empty (non-nil) slices, GroupBy/KeyBy/CountBy return empty (non-nil) maps,
+// Every returns true (vacuous truth) while Some returns false, Find/MinBy/MaxBy
+// report ok == false with the element type's zero value, and MeanBy returns 0.
+// KeyBy resolves duplicate keys last-wins, GroupBy and CountBy accumulate all
+// colliding elements, and none of the transforming functions mutate their input
+// - SortBy, OrderBy, Shuffle, SampleSize and Sample all operate on a copy.
+//
+// Parity with Node/lodash is intentional but bounded by the type system. Names,
+// argument order and results match the JavaScript originals closely enough that
+// a port reads almost line-for-line, and behaviors such as vacuous Every, the
+// last-wins semantics of KeyBy and the early-exit of ForEach are reproduced
+// deliberately. The differences are those Go forces: functions that JavaScript
+// returns a single "not found"/undefined value for instead return a (value,
+// bool) pair (Find, FindLast, Sample, MinBy, MaxBy); OrderBy takes explicit key
+// functions and a parallel slice of "asc"/"desc" strings (an unknown direction
+// is treated as "asc") and compares only the ordered kinds - numbers as
+// float64, plus strings and bools; and InvokeMap takes a method value
+// (func(T, ...any) R) rather than a string method name, since Go has no dynamic
+// dispatch by name. For the randomized helpers (Sample, SampleSize, Shuffle) an
+// optional *math/rand.Rand may be supplied so results are deterministic in
+// tests; when nil is passed a process-wide generator seeded from crypto/rand is
+// used.
 package collection
 
 import (

@@ -1,5 +1,44 @@
-// Package uuid generates and parses RFC 4122 UUIDs, supporting versions 3, 4,
-// and 5 along with the standard predefined namespaces.
+// Package uuid generates and parses RFC 4122 universally unique identifiers.
+// It is a small, standard-library-only Go port of the npm "uuid" package,
+// exposing the two identifier flavours that the vast majority of applications
+// need: fully random version 4 UUIDs and name-based version 5 (SHA-1) UUIDs.
+// A UUID is a 128-bit value canonically rendered as 36 lowercase hexadecimal
+// characters in the grouping 8-4-4-4-12 (for example
+// "6ba7b810-9dad-11d1-80b4-00c04fd430c8"), and every value produced here sets
+// the RFC 4122 variant bits (10xx) and the appropriate version nibble.
+//
+// V4 is the workhorse: it reads 16 bytes from crypto/rand, forces the version
+// nibble to 4 and the variant bits to the RFC 4122 layout, then formats the
+// result. Because 122 of the 128 bits are random, collisions are astronomically
+// unlikely and no coordination between generators is required. Use V4 whenever
+// you need an opaque, unguessable identifier and have no reason to derive it
+// from an existing name.
+//
+// V5 is deterministic and name-based. It hashes a namespace UUID concatenated
+// with a name using SHA-1, truncates the digest to 16 bytes, and stamps in the
+// version (5) and variant bits. The same namespace and name always yield the
+// same UUID, which makes V5 ideal for stable identifiers derived from URLs,
+// domain names, or other natural keys. Four standard namespaces from RFC 4122
+// are provided as constants: NamespaceDNS, NamespaceURL, NamespaceOID, and
+// NamespaceX500. (Note that this package intentionally implements only the
+// random and SHA-1 name-based variants; the MD5-based version 3 is not
+// included.)
+//
+// Parse, Format, and Validate round out the API. Parse converts the canonical
+// string form into a raw [16]byte array, rejecting inputs of the wrong length,
+// with misplaced dashes, or with non-hexadecimal digits. Format performs the
+// inverse, rendering a [16]byte as the canonical lowercase dashed string.
+// Validate is a convenience wrapper that reports whether a string parses
+// cleanly. Parse is deliberately strict about the hyphenated 36-character
+// layout and does not accept braces, urn: prefixes, or uppercase-only forms.
+//
+// Compared with the npm "uuid" package, the output format and the fixed
+// version/variant bits match exactly, so identifiers are interchangeable across
+// the two ecosystems: a V5 UUID computed here for a given namespace and name is
+// byte-for-byte identical to one produced by uuid.v5 in Node, and V4 values
+// validate under both. The main API-shape difference is idiomatic Go error
+// returns instead of thrown exceptions, and the use of crypto/rand rather than
+// Node's crypto.randomBytes as the entropy source.
 package uuid
 
 import (

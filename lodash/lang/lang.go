@@ -1,10 +1,52 @@
-// Package lang ports a selection of lodash "Lang" and utility helpers to Go.
+// Package lang ports the "Lang" category of the npm lodash library, together
+// with a handful of closely related utility helpers, to idiomatic Go using only
+// the standard library. It supplies the runtime type predicates (IsNil, IsEmpty,
+// IsArray, IsMap, IsString, IsNumber, IsBool, IsFunc, IsPointer, IsZero,
+// IsPlainObject, IsError, IsEqual, Eq), the value coercions (ToString, ToNumber,
+// ToInteger, ToFinite, ToArray, CastArray, DefaultTo), the relational
+// comparators (Gt, Gte, Lt, Lte), and the general utility helpers (Times,
+// Identity, Constant, Noop, Range, UniqueId, Once) that lodash groups under its
+// Lang and Util documentation sections.
 //
-// The predicate helpers (IsEmpty, IsNil, IsEqual, ...) operate on values of
-// type any and use the reflect package to inspect dynamic types, mirroring the
-// dynamic behaviour of the original JavaScript utilities. The generic helpers
-// (Times, Identity, Constant, ...) use Go generics where a typed API is more
-// natural than reflection.
+// Reach for this package when Go code needs to inspect or normalise values whose
+// concrete type is not known until run time, for example while decoding
+// arbitrary JSON into an any, validating loosely typed configuration, or
+// re-implementing JavaScript-flavoured logic during a port. It is the Go analogue
+// of scattering _.isEmpty, _.toNumber or _.defaultTo calls throughout a Node
+// codebase, and it lets you keep the permissive, coercion-heavy semantics that
+// front-end and Node developers expect rather than fighting Go's static type
+// system with hand-written type switches at every call site.
+//
+// The predicate and coercion helpers operate on values of type any and lean on
+// the reflect package to examine the dynamic kind of each value, mirroring the
+// duck-typed behaviour of the original JavaScript. IsNumber, for instance,
+// reports true for every built-in signed, unsigned and floating-point kind but
+// false for bool and complex numbers; ToNumber parses numeric strings, maps
+// booleans to 0 or 1 and returns NaN for anything unparseable; and ToFinite and
+// ToInteger further fold NaN to 0 and clamp infinities, exactly as lodash does.
+// The generic helpers (Times, Identity, Constant, Once) instead use Go type
+// parameters, because a statically typed signature is both safer and more
+// natural than reflection for those cases.
+//
+// Edge cases follow lodash rather than Go's stricter defaults. IsNil recognises
+// both an untyped nil interface and a typed nil pointer, slice, map, channel,
+// function or interface; IsEmpty treats nil, empty strings, empty collections
+// and every non-collection scalar (numbers, booleans, structs) as empty; Eq
+// treats two NaN values as equal even though Go's == operator does not; and the
+// coercions never panic on unexpected input, instead returning empty strings,
+// zero, NaN or empty slices the way the JavaScript versions return "", 0, NaN or
+// []. Functions such as CastArray and ToArray always return a non-nil slice so
+// callers can range over the result without a nil check.
+//
+// Parity with Node lodash is close but necessarily shaped by Go's type system.
+// Because Go lacks JavaScript's single Object type, IsPlainObject accepts a Go
+// struct, a pointer to a struct, or a map with string keys as the nearest
+// equivalent of an object literal, and ToString formats floats compactly (via
+// strconv with the 'g' verb) rather than reproducing V8's exact number-to-string
+// algorithm. UniqueId returns process-local, monotonically increasing ids and is
+// safe for concurrent use, and Once memoises the first result of its function
+// under a sync.Once. Where lodash would return JavaScript's undefined, these
+// helpers return the Go zero value or a documented sentinel instead.
 package lang
 
 import (

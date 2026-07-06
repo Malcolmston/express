@@ -1,8 +1,51 @@
-// Package cookiesession implements a lightweight, cookie-only session store.
-// The entire session payload is serialized to JSON, HMAC-signed with a secret,
-// and stored in a single cookie on the client. No server-side storage is
-// required. Because the payload travels with every request it is intended for
-// small amounts of data.
+// Package cookiesession implements a lightweight, cookie-only session store as
+// express middleware. The entire session payload is serialized to JSON,
+// HMAC-signed with a secret, and stored in a single cookie on the client, so
+// no server-side session store is required. It is the Go analogue of the Node
+// cookie-session middleware (expressjs/cookie-session), packaged as a drop-in
+// express.Handler, and like that library it keeps state in the cookie itself
+// rather than in a backend keyed by a session id.
+//
+// Use this middleware when you want per-user session state without the
+// operational cost of a shared store (Redis, a database, or sticky sessions),
+// and when the data is small — a user id, a few flags, a CSRF secret. Because
+// the payload travels in every request and response and browsers cap cookie
+// size (roughly 4KB), it is unsuitable for large or sensitive-in-plaintext
+// data. Mount it once near the top of the chain with app.Use so the session is
+// loaded before your handlers run, then read and write it with the package
+// Get and Set helpers.
+//
+// Operationally the middleware runs early. On each request it looks for the
+// configured cookie (Options.CookieName, default "session"); if present it
+// verifies the HMAC signature and, only on success, decodes the JSON into a
+// per-request map. That map is attached to the request under an internal key
+// and next() is called so handlers can access it. The middleware also
+// registers a res.OnBeforeWrite callback that runs just before the response
+// headers are committed: if and only if the session was modified during the
+// request, it re-serializes the map, signs it, and writes the refreshed cookie
+// via res.Cookie. An unmodified session produces no Set-Cookie header at all,
+// which avoids needless cookie churn and keeps caches friendlier.
+//
+// The signed value is "base64url(json).base64url(hmacSHA256(json))". On read,
+// a missing dot, undecodable segments, a signature mismatch, or malformed JSON
+// all cause the cookie to be silently ignored and the request to start with an
+// empty session, so a tampered or corrupt cookie can never inject forged
+// values. Set marks the session dirty, which is what arms the write-back;
+// Get reports both the value and whether the key was present. The emitted
+// cookie is always Path="/", HTTPOnly, and SameSite=Lax; Options.MaxAge sets
+// its Max-Age in seconds (0 means a session cookie that expires when the
+// browser closes) and Options.Secure restricts it to HTTPS. Options.Secret is
+// the signing key and must be set — an empty secret still produces a valid
+// HMAC but offers no real tamper protection and is strongly discouraged.
+//
+// Compared with the Node original, this port keeps the same signed,
+// stateless-server, write-on-change model and the same "reject silently on bad
+// signature" behaviour, but is deliberately narrower. It stores a single
+// session object rather than exposing a rotating array of signing keys, signs
+// with a fixed HMAC-SHA256 scheme instead of a pluggable keygrip rotation, and
+// does not encrypt the payload — the JSON is signed for integrity but remains
+// readable by the client, so never place secrets that must stay hidden from
+// the user inside the session.
 package cookiesession
 
 import (

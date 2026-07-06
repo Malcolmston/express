@@ -1,6 +1,41 @@
-// Package pagination provides middleware that parses common "page" and "limit"
-// query-string parameters into a normalized, bounds-checked Pagination value
-// stored on the request.
+// Package pagination provides middleware that parses the common "page" and
+// "limit" query-string parameters into a normalized, bounds-checked Pagination
+// value stored on the request. It ports the ubiquitous limit/offset paging
+// convention used by Node helpers such as express-paginate and the manual
+// req.query.page / req.query.limit parsing found in most Express APIs, turning
+// that repetitive boilerplate into a single reusable handler.
+//
+// Use it on any list endpoint that returns results in pages. Instead of each
+// route re-reading and re-validating the query parameters, the middleware does
+// the parsing once and exposes a ready-to-use Pagination struct carrying the
+// requested Page, the effective Limit, and a precomputed Offset suitable for
+// passing straight to a database LIMIT/OFFSET clause or slice bounds.
+//
+// Mechanically the middleware runs before your route handlers, typically via
+// app.Use. For each request it reads req.Query("page") and req.Query("limit"),
+// converts them to integers (falling back to defaults on missing or malformed
+// values), clamps them to sensible bounds, computes Offset as (Page-1)*Limit,
+// and stores the resulting Pagination on the request with req.Set under a
+// private context key before calling next. It never writes to the response or
+// short-circuits the chain; handlers retrieve the value with the From helper.
+//
+// The clamping rules define the important semantics. Page is coerced to a
+// minimum of 1, so negative, zero, or non-numeric page values become the first
+// page. Limit falls back to Options.DefaultLimit (20 when unset) whenever the
+// parameter is absent, non-numeric, or less than 1, and is capped at
+// Options.MaxLimit (100 when unset) to protect the backend from unbounded
+// result requests. Because a zero-value Options is filled in by applyDefaults,
+// calling New() with no arguments yields the 20/100 defaults; From returns a
+// zero Pagination if the middleware never ran, so guard accordingly if a route
+// might be reached without it.
+//
+// Parity with the Node originals is conceptual rather than API-exact. Like
+// express-paginate this package centralizes page/limit parsing and enforces a
+// maximum limit, but it exposes the result as a typed struct fetched via From
+// rather than by mutating req.query or attaching req.skip/req.offset fields, and
+// it uses 1-based pages with a derived Offset instead of driver-specific
+// helpers. The defaults and clamping behavior are chosen to be safe and
+// predictable rather than to match any single Node library byte for byte.
 package pagination
 
 import (

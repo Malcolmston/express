@@ -1,6 +1,45 @@
-// Package servertiming provides express middleware that collects timing
-// metrics during request handling and emits them in a Server-Timing response
-// header, which browsers surface in their developer tools.
+// Package servertiming provides express middleware that collects timing metrics
+// during request handling and emits them in a Server-Timing response header,
+// which browsers surface in their developer tools' network panel. It lets a Go
+// service report how long individual server-side phases took — a database query,
+// a template render, an upstream call — directly to the browser inspecting the
+// response, in the same standardized format that Node middleware such as
+// server-timing produces.
+//
+// Reach for it when you want per-request server observability that requires no
+// external tooling: because the numbers ride along on the response the client
+// already receives, a developer can open dev tools and see the breakdown next to
+// the request, and synthetic monitors or tests can parse the header to assert on
+// backend latency. Each metric is a named segment with a duration in
+// milliseconds and an optional human-readable description, so a single header
+// can carry several labelled measurements at once.
+//
+// Mechanically New installs a fresh Metrics collector on the request under a
+// private context key and registers an OnBeforeWrite hook that, just before the
+// response is committed, renders the accumulated entries and appends them as the
+// Server-Timing header when at least one metric was recorded. Handlers reach the
+// collector with From, which resolves the per-request Metrics value and records
+// measurements through Add or AddWithDesc. Recording is guarded by a mutex, so a
+// handler may add entries from multiple goroutines that fan out during a single
+// request without a data race.
+//
+// The rendered header follows the Server-Timing grammar: each entry is emitted
+// as name;dur=<milliseconds> with two decimal places, and when a description is
+// present a ;desc="..." segment is inserted between them. Any double quotes in a
+// description are replaced with single quotes so the value cannot break out of
+// its quoted form. Durations are supplied as time.Duration values and divided
+// down to fractional milliseconds, so sub-millisecond timings still appear with
+// precision rather than rounding to zero. When no metrics were recorded the hook
+// writes no header at all, keeping responses clean for routes that opt out.
+//
+// From is deliberately null-safe: if it is called on a request that never passed
+// through this middleware it returns a detached, throwaway Metrics rather than
+// nil, so handler code can time work unconditionally without guarding against a
+// missing collector — the measurements simply go nowhere. Relative to the Node
+// original this port keeps the core collect-then-emit model and the standard
+// header format while exposing a compact Go surface: a HeaderName constant, the
+// Metrics type with Add and AddWithDesc, and the From accessor, in place of
+// JavaScript's chainable request-decorating API.
 package servertiming
 
 import (

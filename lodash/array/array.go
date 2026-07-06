@@ -1,18 +1,51 @@
 // Package array provides idiomatic Go generic ports of lodash's array
 // utility functions. It is a standalone package that depends only on the
-// standard library.
+// standard library and mirrors the "Array" category of the npm "lodash"
+// library (the functions exposed individually as lodash.chunk, lodash.compact,
+// lodash.difference, lodash.flatten, and so on). The goal is to give Go code
+// the same everyday slice helpers a JavaScript project reaches for, without
+// pulling in any third-party dependency.
 //
-// Conventions used throughout this package:
+// The package is useful whenever a program is doing the small, repetitive slice
+// manipulations that the standard library leaves to the caller: splitting a
+// slice into fixed-size batches (Chunk), removing empties (Compact),
+// deduplicating (Uniq), computing set relationships across slices (Difference,
+// Intersection, Union, Xor), slicing from either end (Take, Drop, and their
+// Right and While variants), searching (FindIndex, IndexOf), and reshaping
+// (Zip, Unzip, ZipObject, FromPairs, Flatten). Because each function is small
+// and pure, they compose cleanly and are easy to reason about in tests.
 //
-//   - Input slices are never mutated. Functions that lodash documents as
-//     mutating (Pull, PullAll, Remove, Reverse, Fill) instead operate on a
-//     copy and return a new slice.
-//   - Where lodash relies on JavaScript "falsy" values, the Go ports use the
-//     zero value of the element type (see Compact).
-//   - Where lodash accepts an "iteratee", the Go ports accept a key or
-//     predicate function.
-//   - Functions that may fail to produce an element (Head, Last, Nth) return
-//     an additional boolean reporting whether a value was found.
+// Everything is built on Go generics. Functions that only move elements around
+// are parameterized on [T any]; functions that must compare or hash elements
+// (Compact, Difference, Intersection, Union, Xor, Uniq, Without, Pull, IndexOf,
+// and friends) constrain T to [comparable]; SortedIndex requires
+// [T cmp.Ordered] so it can binary-search; and the "By" variants add a second
+// type parameter K for the key returned by an iteratee, for example
+// UniqBy[T any, K comparable]. This means examples and call sites frequently
+// name their type arguments implicitly through inference but must match the
+// exact constraints when a value cannot be inferred.
+//
+// Several conventions are applied uniformly. Input slices are never mutated:
+// functions that lodash documents as mutating (Pull, PullAll, Remove, Reverse,
+// Fill) instead operate on a copy and return a new slice, and slice-returning
+// helpers hand back a fresh backing array rather than an alias into the input.
+// Where lodash relies on JavaScript "falsy" values, the Go ports use the zero
+// value of the element type, so Compact drops 0, "", and the like. Where lodash
+// accepts an "iteratee", the Go ports accept an explicit key or predicate
+// function. Functions that may fail to produce an element (Head, Last, Nth)
+// return an additional boolean reporting whether a value was found, in place of
+// JavaScript's undefined.
+//
+// Edge cases follow lodash's spirit while staying explicit about bounds. Count
+// arguments to Take, Drop, and Slice are clamped into range rather than
+// panicking, and negative indexes count from the end in Nth, Fill, and Slice
+// (so Nth(s, -1) is the last element). Chunk with a size of zero or less yields
+// an empty result, Range treats a zero step as +1 or -1 depending on the
+// direction of travel, and set operations preserve first-seen order and
+// collapse duplicates the way the corresponding lodash functions do. The main
+// intentional divergence from Node is FlattenDeep, which cannot be fully static
+// in Go's type system and therefore operates on []any, recursively flattening
+// nested []any values while leaving every other value untouched.
 package array
 
 import "cmp"
@@ -521,7 +554,9 @@ func FlattenDeep(s []any) []any {
 // Pair is a key/value pair used by FromPairs and produced by other utilities
 // that model lodash's two-element array pairs.
 type Pair[K comparable, V any] struct {
-	Key   K
+	// Key is the pair's key, used as the map key by FromPairs.
+	Key K
+	// Value is the pair's value, stored under Key by FromPairs.
 	Value V
 }
 

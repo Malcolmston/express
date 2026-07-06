@@ -1,7 +1,52 @@
-// Package negotiator is an HTTP content negotiation helper, a port of the
-// npm "negotiator" package. It inspects request headers such as Accept,
-// Accept-Language, Accept-Charset and Accept-Encoding and reports which of a
-// set of available representations best match the client's preferences.
+// Package negotiator is an HTTP content negotiation helper, a stdlib-only Go
+// port of the npm "negotiator" package (https://www.npmjs.com/package/negotiator).
+// It inspects request headers such as Accept, Accept-Language, Accept-Charset
+// and Accept-Encoding and reports which of a set of server-side representations
+// best match the client's stated preferences. Like the Node original, it is a
+// low-level building block: it makes no assumptions about your routes and only
+// answers the question "given these headers and these available options, which
+// options are acceptable and in what order?".
+//
+// Content negotiation matters whenever a single URL can be served in more than
+// one form. A client advertises what it can handle by sending weighted lists in
+// its request headers, for example "Accept: application/json;q=0.9, text/html"
+// or "Accept-Encoding: gzip, br;q=0.8". The server holds a fixed menu of things
+// it is able to produce (JSON or HTML, gzip or brotli, English or French) and
+// must pick the best mutually agreeable choice. This package performs that pick,
+// mirroring the behavior that Express, the accepts package, and many other Node
+// middlewares rely on internally.
+//
+// A Negotiator is constructed from an http.Header via New and exposes four
+// families of methods: MediaTypes/MediaType for the Accept header,
+// Languages/Language for Accept-Language, Charsets/Charset for Accept-Charset,
+// and Encodings/Encoding for Accept-Encoding. The plural methods return every
+// acceptable option in descending preference order; the singular methods return
+// just the best option, or the empty string when nothing is acceptable. Each
+// method optionally takes the list of available options; called with no
+// arguments the plural forms instead report the client's own preferences parsed
+// straight from the header (with q=0 entries and bare wildcards omitted).
+//
+// Preference is driven by the quality value ("q") attached to each header
+// entry, a float in the range 0 through 1 that defaults to 1 when omitted. A
+// higher q means a stronger preference, and a q of 0 explicitly rejects an
+// option: such options are never returned even if they would otherwise match a
+// wildcard. Matching also accounts for specificity — for media types a concrete
+// "text/html" outranks "text/*" which outranks "*/*", and parameters on an
+// accept range (such as level or profile) must all be present on the candidate
+// for the range to apply. When two candidates tie on quality the original order
+// is preserved: for the plural "available" methods that is the order the caller
+// passed the options in, giving the server the final say among equally-weighted
+// choices.
+//
+// A few edge cases match the Node semantics deliberately. A missing or empty
+// Accept header is treated as "*/*", so all offered media types are acceptable.
+// Language matching is prefix-aware, so a header of "en" matches an available
+// "en-US" (and vice versa) at a lower specificity than an exact tag match.
+// Encodings always treat "identity" (no transformation) as acceptable unless it
+// is explicitly disabled with identity;q=0 or a "*;q=0" catch-all, which is why
+// a request advertising only "gzip" will still permit an uncompressed response.
+// This port relies solely on the Go standard library and returns plain string
+// slices, so it composes naturally with net/http handlers.
 package negotiator
 
 import (

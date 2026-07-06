@@ -1,5 +1,50 @@
 // Package sqlstring provides MySQL-style value and identifier escaping and
-// query formatting, mirroring the npm "sqlstring" library.
+// query formatting. It is a Go port of the npm "sqlstring" library (the escaping
+// engine used by the popular mysqljs/mysql driver), reimplemented with only the
+// Go standard library. Its purpose is to let callers build MySQL statements from
+// dynamic data without opening the door to SQL injection.
+//
+// The package is used whenever an application composes SQL text that embeds
+// user-supplied or otherwise untrusted values and cannot (or does not wish to)
+// rely solely on the database driver's own parameter binding. Rather than
+// concatenating raw values into a query, callers pass those values through
+// Escape (for data) or EscapeID (for identifiers), or let Format do both at once
+// while filling placeholders. The escaped output is safe to splice into a query
+// string because every value is turned into a self-contained, correctly quoted
+// SQL literal.
+//
+// Escape converts a Go value into a SQL literal. NULL is produced for nil (and
+// nil pointers); booleans render as true/false; every integer and floating-point
+// type renders as its numeric text; strings are single-quoted with dangerous
+// characters escaped; []byte becomes an X'..' hex blob literal; time.Time becomes
+// a quoted 'YYYY-MM-DD HH:MM:SS' timestamp; and slices or arrays are rendered as
+// a parenthesized, comma-joined list of their escaped elements (ideal for IN
+// clauses). Pointers are dereferenced and any other type is formatted with fmt
+// and single-quoted. The critical step is quoteString, which wraps a string in
+// single quotes and backslash-escapes the characters MySQL treats specially
+// inside a string literal: NUL, backspace, tab, newline, carriage return,
+// Ctrl-Z, the double quote, the single quote, and the backslash itself. Because
+// an attacker's quote characters are neutralized this way, injected text can
+// never break out of the literal and be interpreted as SQL syntax.
+//
+// EscapeID makes an identifier (a table or column name) safe by wrapping it in
+// backticks and doubling any embedded backtick, so a malicious name cannot close
+// the quoting early. A dotted identifier such as "table.col" is split on the dot
+// and each segment is quoted independently, yielding "`table`.`col`" so that
+// qualified names keep working. This is the identifier counterpart to Escape's
+// value quoting and is what the "??" placeholder uses.
+//
+// Format performs placeholder substitution left to right. A "?" placeholder is
+// replaced with the Escape of the next argument, and a "??" placeholder is
+// replaced with the EscapeID of the next argument (coercing non-strings via fmt
+// first). Arguments are consumed in order; if there are more placeholders than
+// arguments the surplus placeholders are left untouched, and if there are more
+// arguments than placeholders the surplus arguments are ignored. Because values
+// and identifiers are always escaped as they are substituted, a query built with
+// Format is injection-safe by construction: untrusted input becomes data or a
+// quoted identifier, never executable SQL. The behavior tracks the npm original;
+// the API is adapted to Go by taking a []any of arguments and returning a string
+// instead of accepting a variadic JavaScript array.
 package sqlstring
 
 import (

@@ -1,8 +1,49 @@
-// Package retry provides a faithful port of the npm p-retry / async-retry
-// libraries: it retries a function with exponential backoff.
+// Package retry retries a function with exponential backoff. It is a
+// stdlib-only Go port of the npm "retry" package (https://www.npmjs.com/package/retry,
+// also published as node-retry) and the higher-level "p-retry" / "async-retry"
+// wrappers built on top of it. Those JavaScript libraries repeatedly invoke an
+// operation that may fail transiently — a flaky network request, a database
+// call, a rate-limited API — pausing between attempts for a delay that grows on
+// each failure, and they are the retry engine behind a large part of the Node
+// ecosystem. This package brings the same retry-with-backoff contract to Go
+// using only the standard library.
 //
-// The sleep function is injectable via Options.Sleep so that tests can verify
-// the backoff schedule without waiting on real time.
+// The central entry point is Do, which calls fn and, on error, sleeps and calls
+// it again until the operation succeeds, the retry budget is exhausted, or an
+// AbortError signals that further attempts are pointless. fn receives the
+// 1-based attempt number so it can log or vary behavior across attempts. When
+// every attempt fails, the error from the final attempt is returned unchanged;
+// when an AbortError is returned, its wrapped error (if any) is returned and no
+// further attempts are made. This mirrors p-retry, where returning an
+// AbortError short-circuits the retry loop.
+//
+// Backoff follows the node-retry formula: the delay before retry attempt n
+// (1-based, where attempt 1 is the pause before the first retry) is
+// MinTimeout * Factor^(n-1), capped at MaxTimeout. Factor defaults to 2,
+// MinTimeout defaults to one second, and MaxTimeout defaults to effectively no
+// cap. With the defaults this yields the classic doubling schedule 1s, 2s, 4s,
+// 8s, and so on; a Factor of 10 with a MinTimeout of 10ms and MaxTimeout of
+// 100ms yields 10ms, 100ms, 100ms, 100ms as the exponential growth saturates at
+// the cap. The Retries option counts retries after the first attempt, so
+// Retries of 3 means up to four total invocations, and Retries of 0 means fn is
+// attempted exactly once.
+//
+// One intentional deviation from node-retry is that this port does not apply
+// randomized jitter. node-retry exposes a "randomize" option that multiplies
+// each delay by a random factor between 1 and 2 to spread out retries from many
+// clients (the thundering-herd problem); here the backoff is fully
+// deterministic, which keeps the schedule predictable and testable. Callers who
+// need jitter can wrap Do or add it inside a custom Sleep. The Backoff method is
+// exported so the exact schedule can be inspected or reused without running the
+// retry loop.
+//
+// Timing is injectable: Options.Sleep replaces the default time.Sleep, and
+// Options.OnRetry is invoked before each retry with the failing error and the
+// attempt number that just failed. Together these make the backoff schedule
+// observable and testable without waiting on real time, and let callers surface
+// retry activity to logs or metrics. Do is safe to call concurrently as long as
+// the supplied fn and callbacks are themselves safe; the package holds no shared
+// state between calls.
 package retry
 
 import (

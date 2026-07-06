@@ -1,9 +1,40 @@
 // Package striptags removes HTML tags from a string while keeping the text
-// content, mirroring the behavior of the npm "striptags" library.
+// content, mirroring the behavior of the npm "striptags" library. It is a small
+// utility for turning a fragment of markup into plain text, for example when
+// generating a preview, building a search index, or sanitizing a value that
+// must not contain any HTML at all.
 //
-// By default every tag is stripped. When one or more allowed tag names are
-// supplied, those tags (and their matching closing tags) are preserved while
-// all other tags are removed. HTML comments are always stripped.
+// By default every tag is stripped: the angle-bracket markup is removed and the
+// text that sits between tags is preserved. When one or more allowed tag names
+// are supplied to StripTags as variadic arguments, those tags (and their
+// matching closing tags) are kept verbatim while all other tags are removed.
+// Allowed tag names may be written either bare ("p") or wrapped in angle
+// brackets ("<p>"); normalizeAllowed accepts either form, and comparison is
+// case-insensitive.
+//
+// The algorithm is a single-pass character state machine rather than a full
+// HTML parser. It moves between three states: plaintext (copying characters to
+// the output), in-tag (buffering characters after a '<' until the matching
+// '>'), and in-comment (consuming everything from "<!--" through "-->"). When a
+// complete tag is buffered, its name is extracted and the tag is emitted only
+// if the name is in the allowed set; otherwise it is dropped. This mirrors the
+// original striptags, which is also a hand-rolled state machine and not a
+// spec-compliant parser.
+//
+// Several edge cases follow the reference library's behavior. HTML comments are
+// always removed regardless of the allowed list. A stray '<' encountered while
+// already inside a tag causes the previously buffered text to be flushed to the
+// output as literal content and a new tag to begin, so malformed input degrades
+// gracefully instead of swallowing text. An unterminated tag run at the end of
+// the input (a trailing '<' with no closing '>') is discarded, matching
+// striptags which drops trailing partial tags.
+//
+// This port intentionally keeps the surface small. Unlike some configurations
+// of the Node package it does not replace stripped tags with a substitute
+// string, does not decode or encode HTML entities, and does not attempt to
+// validate attribute contents; the text between tags, including any entities,
+// is passed through unchanged. The allowed-tag matching is purely by tag name,
+// so attributes on an allowed tag are preserved exactly as written.
 package striptags
 
 import "strings"

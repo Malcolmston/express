@@ -1,10 +1,45 @@
 // Package deepmerge deeply merges maps, modeled on the npm "deepmerge" package.
+// It recursively combines a target map with a source map, producing a brand new
+// map in which nested objects are merged key by key rather than being replaced
+// wholesale. The public API is Merge for the common case, MergeWith for callers
+// that need to customize how slices combine, and MergeAll for folding an
+// arbitrary number of maps together left to right.
 //
-// Merging never mutates its inputs: nested maps and slices are cloned so the
-// returned map is fully independent of the target and source. Nested maps are
-// merged recursively. By default, slices ([]any) are concatenated (target
-// elements followed by source elements), matching deepmerge's default array
-// behavior; callers can override this via MergeWith and Options.ArrayMerge.
+// Reach for deepmerge whenever you need to layer configuration or state: default
+// settings overlaid by user settings, a base document patched by an override, or
+// several partial fragments assembled into one. Because later values win only at
+// the leaves where they actually appear, a source map that sets a single nested
+// field does not clobber sibling fields that only exist in the target. This is
+// the behavior that a shallow copy or a plain map assignment cannot give you.
+//
+// Internally the merge walks both maps in parallel. Keys present only in the
+// target are cloned into the result; keys present only in the source are cloned
+// in as well; keys present in both are reconciled by mergeValues. When both
+// values are map[string]any they are merged recursively. When both values are
+// []any they are combined by the ArrayMerge strategy (concatenation by default).
+// For every other combination, including a type mismatch such as a slice in the
+// target and a map in the source, the source value simply replaces the target
+// value. Scalars, functions, and any non-map/non-slice values are always treated
+// as opaque leaves.
+//
+// Merging never mutates its inputs. Every value that ends up in the result is
+// deep-cloned first, so nested maps and slices in the returned map are fully
+// independent of the originals: mutating the result cannot reach back and change
+// target or source, and vice versa. Nil inputs are accepted and treated as empty
+// maps, so Merge(nil, m) and Merge(m, nil) both yield a clone of the non-nil
+// argument, and MergeAll with no arguments returns an empty, non-nil map. Because
+// Go maps have no defined iteration order the result is order-independent, which
+// matters only for the default array behavior where target elements precede
+// source elements deterministically regardless of map traversal.
+//
+// Compared with the Node original, this port keeps the same default semantics of
+// recursive object merge plus array concatenation and the same guarantee of no
+// input mutation. The main difference is idiomatic: it operates on Go's
+// map[string]any and []any rather than arbitrary JavaScript objects, it has no
+// notion of a customMerge-per-key callback beyond the single ArrayMerge hook, and
+// it does not special-case class instances or non-plain objects the way the
+// JavaScript isMergeableObject check does. Only map[string]any is treated as a
+// mergeable object; everything else is a leaf.
 package deepmerge
 
 // Options configures MergeWith.

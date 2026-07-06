@@ -1,11 +1,46 @@
-// Package dotprop provides get/set/has/delete access to nested
-// map[string]any structures using dotted path strings, mirroring the
-// behavior of the npm "dot-prop" library.
+// Package dotprop provides get/set/has/delete access to nested map[string]any
+// structures using dotted path strings, mirroring the behavior of the npm
+// "dot-prop" library, using only the Go standard library. It exposes four
+// functions — Get, Has, Set, and Delete — that address a value deep inside a
+// tree of maps and slices by a single string path such as "a.b.c" rather than by
+// a chain of hand-written map lookups and type assertions.
 //
-// Paths are dot-separated (e.g. "a.b.c"). A literal dot inside a key can be
-// escaped with a backslash ("a\\.b" refers to the single key "a.b"). Numeric
-// path segments index into []any slices when the current value is a slice,
-// otherwise they are treated as plain string map keys.
+// This is the utility you want when working with dynamically shaped data:
+// configuration loaded from JSON or YAML, a decoded request body, or any
+// map[string]any whose structure is known by path rather than by a Go type. It
+// lets a caller read config.Get(cfg, "server.tls.enabled") or set a deeply nested
+// default without first checking that every intermediate map exists, which keeps
+// option-merging and template-context code short and free of nil-map panics.
+//
+// A path is split on unescaped dots into segments. A literal dot inside a key can
+// be escaped with a backslash, so the Go string "a\\.b" (the path a\.b) refers to
+// the single key "a.b" rather than to a nested a then b; a backslash itself is
+// escaped the same way, and a trailing backslash is kept literally. At each step
+// the resolver looks at the current node: if it is a map[string]any the segment
+// is used as a string key, and if it is a []any the segment is parsed as a
+// base-ten index into the slice. Numeric segments therefore index slices only
+// when the current value actually is a slice; against a map the same digits are
+// an ordinary string key.
+//
+// The four operations have well-defined behavior on the awkward inputs. Get
+// returns (value, true) when the whole path resolves and (nil, false) otherwise —
+// including a missing key, an out-of-range or negative slice index, a
+// non-numeric index into a slice, or an attempt to descend into a scalar leaf —
+// and Has is simply Get with the value discarded. Set creates intermediate
+// map[string]any nodes as needed and overwrites any non-map value that sits in
+// the way of the path, then returns obj so calls can be chained; it does not
+// create slice nodes. Delete removes the addressed key and reports whether
+// something was actually removed. A nil obj or an empty path is a no-op: Get and
+// Has report absence, Set returns obj unchanged, and Delete returns false.
+//
+// Parity with the Node original covers the core get/set/has/delete surface and
+// the dot-with-backslash-escape path grammar. The deliberate differences are
+// idiomatic and reflect Go's type system: values are map[string]any and []any
+// instead of arbitrary JavaScript objects, Get returns the Go-style (value, ok)
+// pair rather than an optional-or-default, array indices only apply to real
+// []any slices, and this port does not implement dot-prop's default-value
+// argument or its escaping of bracket-style paths — paths are dot-and-backslash
+// only.
 package dotprop
 
 import (

@@ -1,10 +1,43 @@
-// Package encodeurl encodes a URL to a percent-encoded form, excluding
-// already-encoded sequences.
+// Package encodeurl encodes a URL to a percent-encoded form while leaving any
+// already-encoded sequences intact, a port of the npm "encodeurl" package that
+// Express and the send/serve-static middleware use when reflecting a request
+// path back into a header such as Location. It exposes the single Encode
+// function and is built on only the Go standard library.
 //
-// It is a port of the npm package "encodeurl". The goal is to encode
-// characters that are unsafe or invalid in a URL while leaving any existing
-// valid percent-encoded sequences (such as "%20") untouched, so that a URL is
-// never double-encoded.
+// The problem it solves is double-encoding. When a server takes a URL that may
+// already contain percent-escapes — most commonly the request URL itself — and
+// needs to place it somewhere that requires a valid URL (a redirect target, an
+// error message, a link), naively percent-encoding it would turn an existing
+// "%20" into "%2520". Encode instead encodes only the characters that are unsafe
+// or invalid in a URL and passes through sequences that already look like valid
+// escapes, so the output is safe to emit exactly once without corrupting escapes
+// the caller had already applied.
+//
+// Encoding follows the reference implementation's fixed character set. A byte is
+// left untouched when it is in encodeURI's reserved-plus-unreserved set (letters,
+// digits, and the punctuation such as ! # $ & ' ( ) * + , - . / : ; = ? @ _ ~ [ ]
+// that make up URL structure); every other character is percent-encoded using its
+// UTF-8 bytes with upper-case hex digits. The '%' character is special-cased: a
+// '%' that begins a valid escape — two hex digits, or a single hex digit at the
+// very end of the string — is preserved as a literal '%', while a '%' that is not
+// the start of a valid escape is itself encoded to "%25", which is what prevents
+// double-encoding while still repairing stray percent signs.
+//
+// A few edge cases are worth noting. The input is decoded into runes before
+// scanning, so invalid UTF-8 bytes are replaced with the Unicode replacement
+// character U+FFFD (which then encodes to its UTF-8 form) rather than being
+// passed through raw. The empty string encodes to the empty string, and an input
+// that contains only safe characters and valid escapes is returned effectively
+// unchanged. Encode does not parse or validate URL structure — it does not know
+// about schemes, hosts, or query boundaries — it is purely a character-level
+// transform, so it can be applied to a full URL or to any fragment of one.
+//
+// Parity with the Node original is intentional: the same safe-character set, the
+// same "preserve valid escapes, encode stray %" rule, and the same upper-case
+// UTF-8 percent-encoding, so Encode reproduces encodeurl's output for typical
+// paths and URLs. The differences are idiomatic — Encode takes and returns a Go
+// string and uses Go's UTF-8 handling instead of a JavaScript regular-expression
+// replace over a JavaScript string.
 package encodeurl
 
 import (

@@ -1,6 +1,36 @@
 // Package randomstring is a standard-library port of the npm "randomstring"
 // library. It generates random strings from named character-set presets or a
 // custom character set using crypto/rand for unbiased sampling.
+//
+// Random strings are a common building block for tokens, temporary passwords,
+// session identifiers, file names, and test fixtures. This package packages
+// that need behind a small API: pick a length and either a named charset or a
+// literal set of characters, and receive a string of that length drawn from
+// those characters. Because the source of randomness is crypto/rand, the output
+// is suitable for security-sensitive identifiers, unlike helpers built on
+// math/rand.
+//
+// Sampling is uniform and unbiased. For each output position the code draws a
+// value in [0, len(charset)) with crypto/rand's rand.Int, which uses rejection
+// sampling internally, so no character is favored even when the charset length
+// does not evenly divide the size of the random space. The charset is treated
+// as a slice of runes, so multi-byte Unicode characters count as a single
+// symbol and are emitted whole.
+//
+// Three entry points cover the common cases. GenerateFrom takes an explicit
+// character set and is the lowest-level primitive. Generate selects one of the
+// named presets: "alphanumeric" (the default when the name is empty),
+// "alphabetic", "numeric", "hex", "binary", and "octal". New is a convenience
+// wrapper returning a 32-character alphanumeric string, the library's typical
+// default token.
+//
+// Error semantics are explicit. A negative length is rejected, an empty charset
+// is rejected, and an unknown preset name returns an error rather than falling
+// back silently. A length of zero is valid and yields the empty string. The
+// main parity difference from the npm original is shape rather than behavior:
+// where the JavaScript version exposes a single options object with fields like
+// length, charset, capitalization, and readable, this port offers a small set
+// of explicit functions and leaves higher-level formatting to the caller.
 package randomstring
 
 import (

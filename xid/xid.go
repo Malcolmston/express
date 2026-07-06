@@ -1,5 +1,44 @@
-// Package xid generates globally unique, sortable 12-byte identifiers encoded as
-// 20-character base32 strings, a Go port of the "xid" scheme.
+// Package xid generates globally unique, sortable 12-byte identifiers encoded
+// as 20-character base32 strings. It is a standard-library-only Go port of the
+// xid scheme popularised by rs/xid and mirrored by the npm "xid-js" library.
+// The design follows MongoDB's ObjectID: it is compact, lexically sortable by
+// creation time, and safe to generate on many hosts and processes concurrently
+// without any central coordinator.
+//
+// Each id is 12 raw bytes laid out as four fields. The first 4 bytes are a
+// big-endian Unix timestamp in seconds; the next 3 bytes are a machine
+// identifier; the following 2 bytes are the process id; and the final 3 bytes
+// are a monotonically increasing counter. Placing the timestamp in the most
+// significant bytes is what makes ids sort chronologically. The machine id is
+// derived from the first three bytes of the MD5 hash of the host name (falling
+// back to random bytes when the host name is unavailable), and both the machine
+// id and pid are captured once in the package init function.
+//
+// The 12 bytes are rendered as a fixed 20-character string using base32-hex
+// with the lowercase alphabet "0123456789abcdefghijklmnopqrstuv". This encoding
+// preserves byte order, so string comparison of two ids agrees with the order
+// of their underlying bytes and therefore with their timestamps. Because 20
+// base32 characters carry 100 bits while the value is only 96 bits, the final
+// character encodes just the low four bits of the last byte, and Decode maps
+// each character back through a reverse lookup table, rejecting inputs of the
+// wrong length or containing characters outside the alphabet.
+//
+// New is the convenient generator: it takes a Unix-seconds timestamp and, on
+// every call, atomically increments the shared 32-bit counter (seeded randomly
+// at startup) before combining it with the process-wide machine id and pid.
+// This atomic increment is what guarantees uniqueness within a single second on
+// one process and gives successive ids from the same second a strictly
+// increasing counter field. NewWithData exposes every component so callers can
+// build an id deterministically from an explicit timestamp, machine id, pid,
+// and counter, which is primarily useful for testing and reproducible output.
+//
+// Decode returns the raw [12]byte for a string id, and Time extracts just the
+// embedded Unix-seconds timestamp. Compared with the npm "xid-js" package and
+// rs/xid, the byte layout, field ordering, base32-hex alphabet, and
+// 20-character canonical form are identical, so ids produced here interoperate
+// with those libraries; the differences are idiomatic Go APIs (an exported
+// counter-driven New plus a fully explicit NewWithData) and Go-style error
+// returns from Decode and Time rather than thrown exceptions.
 package xid
 
 import (

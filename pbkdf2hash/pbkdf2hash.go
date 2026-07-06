@@ -1,5 +1,50 @@
-// Package pbkdf2hash implements PBKDF2-HMAC-SHA256 key derivation and a
-// Django-style password hash encoding.
+// Package pbkdf2hash implements PBKDF2-HMAC-SHA256 key derivation together with
+// a self-describing, textual password-hash encoding. It occupies the same niche
+// as the npm pbkdf2-password module and the broader family of PHC/@node-rs-style
+// password hashers: it turns a plaintext password into a storable string and can
+// later verify a candidate password against that string without keeping the
+// original around. Everything here is built on the Go standard library
+// (crypto/hmac, crypto/sha256, crypto/rand and crypto/subtle), so it has no
+// third-party dependencies.
+//
+// You reach for this package whenever you need to persist passwords safely.
+// Storing plaintext (or a plain SHA-256) is unsafe because a leaked database
+// immediately exposes every credential. PBKDF2 defends against that by making
+// each guess deliberately expensive: an attacker must repeat many thousands of
+// HMAC evaluations per candidate password, which throttles offline brute-force
+// and dictionary attacks. The per-hash random salt additionally defeats rainbow
+// tables and ensures two users with the same password produce different hashes.
+//
+// The mechanism is standard PBKDF2 (RFC 2898) with HMAC-SHA256 as the underlying
+// pseudo-random function. DeriveKey is the raw primitive: given a password, a
+// salt, an iteration count and a desired key length it produces that many bytes
+// of derived key material by computing HMAC blocks and XOR-folding each block
+// across the requested number of iterations. Higher iteration counts increase
+// the cost of every guess (and every legitimate login), so the value is a
+// deliberate security/latency trade-off.
+//
+// Hash and Verify build a Django-compatible encoded string on top of DeriveKey.
+// Hash generates a fresh 16-byte cryptographically random salt, derives a 32-byte
+// key and returns the string "pbkdf2_sha256$<iterations>$<hexsalt>$<hexkey>". All
+// parameters needed to check a password later — the algorithm tag, iteration
+// count, salt and expected key — are embedded in that single self-describing
+// field, so no side-channel storage is required. If iterations is zero or
+// negative Hash substitutes a default of 100000. Verify reverses the process: it
+// parses the four dollar-separated fields, re-derives a key of the same length
+// from the candidate password and salt, and compares it against the stored key
+// using subtle.ConstantTimeCompare so that comparison time does not leak how many
+// leading bytes matched.
+//
+// Edge cases and Node parity: an empty password is accepted and hashed like any
+// other byte string. A malformed encoded string — wrong field count, wrong
+// algorithm tag, or non-hex salt/key — makes Verify return false rather than
+// panicking or erroring. Verify is fully deterministic given the encoded hash, so
+// repeated verification of the same password/hash pair always agrees. Compared to
+// the Node ecosystem this port fixes the digest to SHA-256 and the encoding to
+// the Django "pbkdf2_sha256" layout rather than exposing pluggable digests; the
+// numeric key-derivation output of DeriveKey matches PBKDF2 as implemented
+// everywhere, so a hash produced here verifies against any conforming PBKDF2
+// implementation that is told the same parameters.
 package pbkdf2hash
 
 import (

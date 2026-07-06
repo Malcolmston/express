@@ -1,10 +1,41 @@
 // Package forwarded parses the X-Forwarded-For header along with a socket
 // remote address to produce the chain of addresses that a request traversed.
+// It is a Go port of the npm module "forwarded" (the same helper that Express
+// and the "proxy-addr" module build on) and reproduces that module's ordering
+// and trimming rules exactly.
 //
-// It is a Go port of the npm module "forwarded". The returned slice always
-// begins with the socket remote address, followed by the addresses parsed from
-// the X-Forwarded-For header value in reverse order (that is, the proxy closest
-// to the server first).
+// Use this package when your application sits behind one or more reverse
+// proxies or load balancers and you need to recover the client's original
+// address, or the full list of intermediaries a request passed through. The
+// socket's immediate peer (the nearest proxy, or the client itself when there
+// is no proxy) is always known reliably; the X-Forwarded-For header records the
+// addresses each proxy observed and appended as the request was relayed onward.
+//
+// The algorithm is deliberately simple and does no validation. Forwarded takes
+// the socket remote address and the raw X-Forwarded-For value, strips any port
+// from the remote address, and returns a slice whose first element is that
+// remote address. It then splits the header on commas and appends the entries
+// from rightmost to leftmost, so the resulting slice reads from the proxy
+// closest to the server outward toward the original client. FromRequest is a
+// convenience wrapper that pulls r.RemoteAddr and the X-Forwarded-For header
+// from an *http.Request before delegating to Forwarded.
+//
+// Several edge cases are handled to preserve parity with the Node original.
+// An empty or missing header yields a single-element slice containing only the
+// remote address. Each header entry is trimmed of surrounding whitespace, but
+// empty entries (for example from a "a,,b" value) are preserved as empty
+// strings rather than being dropped. Port stripping understands IPv4
+// "host:port", bracketed IPv6 "[::1]:8080" and "[::1]" forms, and bare IPv6
+// literals such as "::1" or "2001:db8::1", which are returned unchanged because
+// they carry no port. Malformed input is never rejected; it is returned as-is.
+//
+// The one intentional deviation from the JavaScript module is ergonomic rather
+// than behavioral: because Go's *http.Request exposes RemoteAddr as a string
+// instead of a socket object, the core logic lives in Forwarded, which accepts
+// the remote address and header value directly, and FromRequest adapts a
+// request to that signature. The addresses returned are plain strings and are
+// not parsed into net.IP values, matching the string-based results of the npm
+// package.
 package forwarded
 
 import (

@@ -1,7 +1,12 @@
 // Package validator provides lightweight, fluent input validation for express
-// handlers, in the spirit of Node's express-validator. Build a Schema of field
-// rules and either validate a map directly or mount it as middleware that
-// rejects invalid requests with a 400 JSON response.
+// handlers, in the spirit of the npm "express-validator" package. Instead of
+// mirroring express-validator's global check()/body()/query() functions and
+// its validationResult() accumulator, this port models validation as a Schema
+// value: an ordered list of per-field rule chains that you build once and reuse
+// as a plain function or as request middleware. Build a Schema of field rules
+// and either validate a map directly with Schema.Validate or mount it with
+// Schema.Body / Schema.Query so that invalid requests are rejected with a 400
+// JSON response before your handler runs.
 //
 //	schema := validator.Schema{
 //		validator.Field("email").Required().Email(),
@@ -10,6 +15,46 @@
 //	}
 //
 //	app.Post("/users", schema.Body(), createUser)
+//
+// You reach for this package when an express route needs to guard its body or
+// query string against missing, malformed, or out-of-range fields without
+// pulling in a large dependency. Each Field starts a chain, and the chained
+// methods (Required, Optional, Email, MinLen, MaxLen, Min, Max, IsInt,
+// IsNumber, In, Matches, Custom) append rules that are evaluated in the order
+// they were declared. Rule chains are fluent: every method returns the same
+// *FieldRules pointer, so a whole field can be described in a single readable
+// expression that reads much like the express-validator DSL it emulates.
+//
+// Mechanically, a rule is a func(value any, present bool) string. It receives
+// the raw field value together with a flag indicating whether the key was
+// present in the incoming map, and returns an empty string when the value is
+// acceptable or a human-readable message when it is not. Schema.Validate walks
+// each field, looks the value up in the supplied map[string]any, and runs the
+// field's rules in sequence, collecting at most one message per field (the
+// first that fails) into an Errors slice. Numeric rules coerce strings via
+// strconv, string-length rules count bytes with len, Email matches a pragmatic
+// regular expression (a local part, an "@", and a dotted domain), and Matches
+// compiles an arbitrary caller-supplied pattern with regexp.MustCompile.
+//
+// Presence and emptiness have deliberate semantics. A value is "empty" when it
+// is nil or a string that is blank after trimming whitespace. Required fails on
+// a missing or empty value; Optional causes the entire remaining chain to be
+// skipped when the field is absent or empty, so optional fields validate only
+// when the caller actually supplied something. Every other rule treats an
+// absent value as passing, which means order matters: pair a value constraint
+// with Required (or Optional) to decide what happens when the field is not
+// sent. The middleware forms normalize their inputs first, flattening url.Values
+// (from a query string or urlencoded body) so that only the first value of each
+// key is validated as a string.
+//
+// Compared with the Node original, the surface here is intentionally smaller
+// and synchronous: there are no sanitizers, no async/custom-promise validators,
+// no wildcard or nested-path selectors, and no per-rule custom messages beyond
+// what Custom returns. What does match is the spirit of a declarative,
+// chainable, per-field rule set and the 400-with-errors behavior of the
+// middleware, whose JSON payload is {"errors": [{"field", "message"}, ...]}.
+// For raw single-value string checks (IsEmail, IsURL, IsUUID, and friends) that
+// correspond to validator.js, use the sibling validatorjs package instead.
 package validator
 
 import (
@@ -201,7 +246,9 @@ func (f *FieldRules) Custom(fn func(value any) string) *FieldRules {
 
 // FieldError is a single validation failure.
 type FieldError struct {
-	Field   string `json:"field"`
+	// Field is the name of the field that failed validation.
+	Field string `json:"field"`
+	// Message is the human-readable reason the field was rejected.
 	Message string `json:"message"`
 }
 
