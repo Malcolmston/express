@@ -73,7 +73,8 @@ func ExampleIsInt() {
 	fmt.Println(validatorjs.IsInt("007"))
 	// Output:
 	// true
-	// false? no
+	// true
+	// false
 }
 
 // ExampleIsStrongPassword checks the composite strength rule. IsStrongPassword

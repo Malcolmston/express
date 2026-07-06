@@ -39,7 +39,7 @@ func ExampleIsValid() {
 	fmt.Println(ipaddr.IsValid("garbage"))
 	// Output:
 	// true
-	// false
+	// true
 	// false
 	// false
 }

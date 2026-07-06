@@ -29,7 +29,11 @@ func ExampleNew() {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		app.ServeHTTP(w, r)
-		fmt.Printf("%-12s -> %d %s%s\n", path, w.Code, w.Header().Get("Location"), w.Body.String())
+		if loc := w.Header().Get("Location"); loc != "" {
+			fmt.Printf("%-12s -> %d %s\n", path, w.Code, loc)
+		} else {
+			fmt.Printf("%-12s -> %d %s\n", path, w.Code, w.Body.String())
+		}
 	}
 	call("/about")
 	call("/about/")

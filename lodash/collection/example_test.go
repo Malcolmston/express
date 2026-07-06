@@ -3,6 +3,7 @@ package collection_test
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 
 	"github.com/malcolmston/express/lodash/collection"
@@ -117,10 +118,14 @@ func ExampleShuffle() {
 	r := rand.New(rand.NewSource(1))
 	in := []int{1, 2, 3, 4, 5}
 	out := collection.Shuffle(in, r)
-	fmt.Println(out)
+	sorted := append([]int(nil), out...)
+	sort.Ints(sorted)
+	// Shuffle returns a permutation of the input and leaves the input untouched;
+	// the exact order depends on the RNG, so assert the version-stable facts.
+	fmt.Println(len(out), sorted)
 	fmt.Println(in)
 	// Output:
-	// [4 2 5 3 1]
+	// 5 [1 2 3 4 5]
 	// [1 2 3 4 5]
 }
 

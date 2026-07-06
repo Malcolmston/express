@@ -23,7 +23,7 @@ func ExampleParse() {
 	// Output:
 	// path: /foo/bar
 	// query: baz=1&qux=2
-	// baz: 2 -- placeholder
+	// baz: 1
 }
 
 // ExampleParse_encoded shows that percent-encoded path segments are handled
