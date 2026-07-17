@@ -15,16 +15,19 @@ export const EXPRESS: Lib = {
   pkg: "github.com/malcolmston/express", node: "expressjs/express",
   repo: "https://github.com/malcolmston/express", docs: "https://malcolmston.github.io/express/",
   tagline: "Fast, unopinionated, minimalist web framework.",
-  blurb: "Routing, middleware chains, views, content negotiation and streaming — the Express you know, in Go. " +
-    "The same three-argument handler signature, path patterns (:param, :id?, :id(\\\\d+), *), and mountable routers.",
-  tags: ["routing", "middleware", "views", "SSE / streaming", "QUERY method", "190+ packages"],
+  blurb: "Routing, middleware chains, views, content negotiation and streaming — the Express you know, in Go, " +
+    "with zero third-party dependencies. Same three-argument handler signature, path patterns " +
+    "(:param, :id?, :id(\\\\d+), *) and mountable routers, plus 191 importable packages: the core framework, " +
+    "102 connect-style middleware and 88 standalone npm utility ports.",
+  tags: ["routing", "middleware", "views", "SSE / streaming", "QUERY method", "stdlib-only", "191 packages"],
   features: [
     "Handlers with the classic <code>(req, res, next)</code> shape",
     "Path-to-regexp params: <code>:id</code>, optional <code>:id?</code>, regex <code>:id(\\d+)</code>, wildcard <code>*</code>",
     "Routers with <code>CaseSensitive</code> / <code>Strict</code> / <code>MergeParams</code> options",
-    "Views via <code>html/template</code>, <code>res.Render</code> / <code>res.SendFile</code>",
-    "Content negotiation, SSE &amp; chunked streaming, the new <code>QUERY</code> HTTP method",
-    "Batteries: 100+ middleware + utility ports (<code>ms</code>, <code>bytes</code>, <code>cookie</code>, <code>qs</code>, <code>jsonwebtoken</code>, <code>uuid</code>, <code>lodash/*</code> …)",
+    "Views via <code>html/template</code>, <code>res.Render</code> / <code>res.SendFile</code> / <code>res.Download</code>",
+    "Content negotiation, SSE &amp; chunked streaming (<code>res.SSE</code> / <code>res.Stream</code>), the new <code>QUERY</code> HTTP method",
+    "102 connect-style middleware under <code>middleware/*</code> — CORS, sessions, rate limiting, <code>helmet</code>, CSRF, compression …",
+    "88 dependency-free utility ports: <code>ms</code>, <code>bytes</code>, <code>cookie</code>, <code>qs</code>, <code>jsonwebtoken</code>, <code>uuid</code>, <code>lodash/*</code> …",
     "<code>express.WrapHandler</code> mounts any <code>net/http</code> handler"
   ],
   node_code:
