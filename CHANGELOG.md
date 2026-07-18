@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-18
+### Added
+- **Production middleware suite** (root package): `CORS`, `SecurityHeaders`
+  (helmet-like), `RequestID`, `ResponseTime`, `NoCache`, `MethodOverride`,
+  `BasicAuth`, `BodyLimit`, `RealIP`, `Favicon`, `RateLimit` (fixed-window),
+  `Compress` (gzip), `Timeout`, `SetHeaders`, `HealthCheck`, `RedirectToHTTPS`,
+  `Compose` and `When`, with `CORSOptions`/`SecurityOptions`/`BasicAuthOptions`/
+  `RateLimitOptions`.
+- **Response/request helpers**: `res.JSONP`, `res.Links`, `res.CacheControl`,
+  `res.RemoveHeader`, `req.Subdomains`, `req.Xhr`, `req.Referrer`,
+  `req.UserAgent`, `req.BaseURL`, `req.ContentType`.
+- **12 new utility sub-packages** (~330 exported symbols) toward broader parity:
+  `ansi`, `base58`, `base62`, `changecase`, `color`, `nodepath`,
+  `numberformat`, `semver`, `stats`, `stringdistance`, plus `lodash/function`
+  and `lodash/util`, and additional `lodash` extensions across array/collection/
+  lang/object/str/datefns. All standard-library-only with full godoc and tests.
+
 ## [0.3.0] - 2026-07-18
 ### Added
 - **`app.Docs()` — automatic API documentation.** A single call introspects the
