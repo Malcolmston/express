@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/malcolmston/express/encodeurl"
 )
 
 // Response wraps an http.ResponseWriter and provides chainable Express-style
@@ -19,6 +21,12 @@ type Response struct {
 	app        *Application
 	statusCode int
 	written    bool
+	// invalidStatus is set by writeHeaderOnce when the requested status code
+	// falls outside the valid [100, 999] range. Express raises a RangeError in
+	// that case which its error handler turns into a 500 "Invalid status code"
+	// response; the port reproduces that outcome at commit time and uses this
+	// flag to suppress any body the handler tried to write afterwards.
+	invalidStatus bool
 	// Locals holds values scoped to this request/response cycle, mirroring
 	// Express's res.locals.
 	Locals map[string]any
@@ -90,8 +98,15 @@ func (res *Response) Vary(field string) *Response {
 }
 
 // Location sets the Location response header.
+//
+// The URL is percent-encoded with encodeurl before being written, mirroring
+// Express's res.location: characters that are unsafe or invalid in a URL are
+// escaped while already-encoded "%xx" sequences are preserved, so a value such
+// as "https://example.com?q=☃ §10" becomes
+// "https://example.com?q=%E2%98%83%20%C2%A710". Values that already consist of
+// safe characters (e.g. "http://google.com/") are returned unchanged.
 func (res *Response) Location(url string) *Response {
-	return res.Set("Location", url)
+	return res.Set("Location", encodeurl.Encode(url))
 }
 
 // writeHeaderOnce commits the status line exactly once.
@@ -108,6 +123,17 @@ func (res *Response) writeHeaderOnce() {
 	if res.app != nil && res.app.Enabled("x-powered-by") && res.GetHeader("X-Powered-By") == "" {
 		res.Writer.Header().Set("X-Powered-By", "Express")
 	}
+	// Express validates the status code and raises a RangeError for anything
+	// outside [100, 999]; its default error handler renders that as a 500 with
+	// an "Invalid status code" message. Reproduce that here so an out-of-range
+	// Status(code) never emits a malformed status line.
+	if res.statusCode < 100 || res.statusCode > 999 {
+		res.invalidStatus = true
+		res.Writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		res.Writer.WriteHeader(http.StatusInternalServerError)
+		_, _ = res.Writer.Write([]byte(fmt.Sprintf("Invalid status code: %d", res.statusCode)))
+		return
+	}
 	res.Writer.WriteHeader(res.statusCode)
 }
 
@@ -120,12 +146,18 @@ func (res *Response) Send(body any) *Response {
 			res.Type("html")
 		}
 		res.writeHeaderOnce()
+		if res.invalidStatus {
+			return res
+		}
 		_, _ = res.Writer.Write([]byte(v))
 	case []byte:
 		if res.GetHeader("Content-Type") == "" {
 			res.Type("application/octet-stream")
 		}
 		res.writeHeaderOnce()
+		if res.invalidStatus {
+			return res
+		}
 		_, _ = res.Writer.Write(v)
 	case nil:
 		res.writeHeaderOnce()
@@ -146,6 +178,9 @@ func (res *Response) JSON(v any) *Response {
 		return res
 	}
 	res.writeHeaderOnce()
+	if res.invalidStatus {
+		return res
+	}
 	_, _ = res.Writer.Write(data)
 	return res
 }
@@ -178,9 +213,12 @@ func (res *Response) Redirect(args ...any) *Response {
 		res.finalError(fmt.Errorf("express: Redirect requires (url) or (status, url)"))
 		return res
 	}
-	res.Set("Location", location)
+	res.Location(location)
 	res.Status(code)
 	res.writeHeaderOnce()
+	if res.invalidStatus {
+		return res
+	}
 	_, _ = res.Writer.Write([]byte("Redirecting to " + location))
 	return res
 }
@@ -244,6 +282,15 @@ func normalizeContentType(t string) string {
 		}
 		return t
 	}
+	// A token carrying an explicit extension — a filename such as "foo.js",
+	// "file.tar.gz" or ".json" — is resolved by its final extension, mirroring
+	// Express's res.type, which routes such values through mime.contentType.
+	// Bare tokens fall through to the shorthand table below and are otherwise
+	// returned verbatim, matching the port's established behaviour.
+	if strings.Contains(t, ".") {
+		ext := t[strings.LastIndexByte(t, '.')+1:]
+		return extContentType(ext)
+	}
 	switch t {
 	case "json":
 		return "application/json; charset=utf-8"
@@ -259,6 +306,51 @@ func normalizeContentType(t string) string {
 		return "text/css; charset=utf-8"
 	default:
 		return t
+	}
+}
+
+// extContentType resolves a filename extension (without the leading dot) to a
+// full Content-Type value, appending "; charset=utf-8" for the text-based
+// formats that carry a charset. It mirrors the subset of the mime database that
+// Express's res.type exercises; an unrecognised extension yields
+// "application/octet-stream", exactly as mime.contentType returns for an
+// unknown lookup.
+func extContentType(ext string) string {
+	switch strings.ToLower(ext) {
+	case "json":
+		return "application/json; charset=utf-8"
+	case "js", "mjs", "cjs", "javascript":
+		return "application/javascript; charset=utf-8"
+	case "html", "htm":
+		return "text/html; charset=utf-8"
+	case "css":
+		return "text/css; charset=utf-8"
+	case "xml":
+		return "application/xml; charset=utf-8"
+	case "txt", "text":
+		return "text/plain; charset=utf-8"
+	case "csv":
+		return "text/csv; charset=utf-8"
+	case "md", "markdown":
+		return "text/markdown; charset=utf-8"
+	case "gz", "gzip", "tgz":
+		return "application/gzip"
+	case "tar":
+		return "application/x-tar"
+	case "zip":
+		return "application/zip"
+	case "pdf":
+		return "application/pdf"
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "gif":
+		return "image/gif"
+	case "svg":
+		return "image/svg+xml"
+	default:
+		return "application/octet-stream"
 	}
 }
 
