@@ -24,6 +24,11 @@ type Application struct {
 	// viewCache memoises resolved view paths and (for the built-in engine)
 	// compiled templates when the "view cache" setting is enabled.
 	viewCache *viewCache
+
+	// docs holds API-documentation metadata (route descriptions, event
+	// channels and options) registered via Describe/Channel/Docs. It is
+	// created lazily so apps that never use the docs feature pay nothing.
+	docs *docsRegistry
 }
 
 // New creates a new express Application.

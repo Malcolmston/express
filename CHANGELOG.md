@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+### Added
+- **`app.Docs()` — automatic API documentation.** A single call introspects the
+  application's registered routes (including mounted sub-routers) and serves a
+  generated OpenAPI 3.1 specification together with interactive Swagger UI and
+  ReDoc pages, a YAML rendering, an AsyncAPI 2.6 document for socket/event
+  channels, and an importable Postman v2.1 collection.
+- `app.Routes()` / `router.Routes()` return the discovered routes (`RouteInfo`)
+  with method, path and path parameters, de-duplicated and sorted.
+- `app.Describe(method, path, RouteDoc{...})` enriches a route's generated
+  operation with a summary, description, tags, parameters, request body and
+  responses that introspection alone cannot infer.
+- `app.Channel(name, ChannelDoc{...})` documents an event/socket channel
+  (Socket.IO event, WebSocket topic, queue subject) for the AsyncAPI document.
+- `app.OpenAPI()`, `app.OpenAPIYAML()`, `app.AsyncAPI()` and
+  `app.PostmanCollection()` return the specifications directly for custom
+  serving. `DocsOptions` configures titles, servers, endpoint paths (set any to
+  `"-"` to disable), the UI asset base URL, and an `Enrich` hook for
+  programmatic customisation of every operation.
+
 ## [0.1.0] - 2026-07-04
 ### Added
 - Initial public release — a faithful, dependency-light Go port of Express.

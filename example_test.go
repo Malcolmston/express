@@ -69,3 +69,45 @@ func ExampleApplication_Use() {
 	fmt.Println(rec.Code, strings.TrimSpace(rec.Body.String()))
 	// Output: 200 ok
 }
+
+// ExampleApplication_Docs shows how a single call to app.Docs turns an
+// application's registered routes into a live OpenAPI 3.1 specification (plus
+// Swagger UI, ReDoc, a YAML spec, an AsyncAPI document for event channels and a
+// Postman collection). Routes are introspected automatically; Describe adds the
+// details introspection cannot infer, and Channel documents socket/event topics.
+func ExampleApplication_Docs() {
+	app := express.New()
+
+	app.Get("/users/:id", func(req *express.Request, res *express.Response, next express.Next) {
+		res.JSON(map[string]string{"id": req.Params("id")})
+	})
+
+	// Optional: enrich the generated operation.
+	app.Describe("GET", "/users/:id", express.RouteDoc{
+		Summary: "Fetch a user",
+		Tags:    []string{"users"},
+	})
+
+	// Optional: document a socket/event channel for the AsyncAPI spec.
+	app.Channel("chat.message", express.ChannelDoc{
+		Subscribe: &express.MessageDoc{Name: "messageReceived"},
+	})
+
+	// Mount /docs, /openapi.json, /openapi.yaml, /redoc, /asyncapi.json and
+	// /postman.json.
+	app.Docs(express.DocsOptions{Title: "Users API", Version: "1.0.0"})
+
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+
+	doc := app.OpenAPI()
+	fmt.Println("openapi:", doc.OpenAPI)
+	fmt.Println("title:", doc.Info.Title)
+	fmt.Println("has /users/{id}:", doc.Paths["/users/{id}"] != nil)
+	fmt.Println("served status:", rec.Code)
+	// Output:
+	// openapi: 3.1.0
+	// title: Users API
+	// has /users/{id}: true
+	// served status: 200
+}

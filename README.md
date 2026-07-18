@@ -363,6 +363,66 @@ app.Get("/events", func(req *express.Request, res *express.Response, next expres
 `SSEWriter` provides `Send`, `SendData`, `SendJSON`, `SendID` (for
 `Last-Event-ID` resumption), `Comment`, and `Retry`.
 
+## API documentation (`app.Docs`)
+
+`app.Docs()` introspects every route you have registered — including those on
+mounted sub-routers — and serves live, standards-compliant API documentation
+with no code generation step and no third-party dependencies. One call mounts an
+OpenAPI 3.1 spec, interactive Swagger UI and ReDoc pages, a YAML rendering, an
+AsyncAPI 2.6 document for socket/event channels, and a Postman collection.
+
+```go
+app := express.New()
+
+app.Get("/users", listUsers)
+app.Post("/users", createUser)
+app.Get("/users/:id", getUser)
+
+// Introspection knows the method, path and :id parameter automatically.
+// Describe adds the parts it can't infer.
+app.Describe("POST", "/users", express.RouteDoc{
+	Summary: "Create a user",
+	Tags:    []string{"users"},
+	RequestBody: &express.BodyDoc{
+		Required: true,
+		Schema:   map[string]any{"type": "object", "required": []any{"name"}},
+	},
+	Responses: map[string]express.ResponseDoc{
+		"201": {Description: "Created", Schema: map[string]any{"type": "object"}},
+	},
+})
+
+// Document socket/event channels for the AsyncAPI spec.
+app.Channel("chat.message", express.ChannelDoc{
+	Description: "Live chat messages",
+	Subscribe:   &express.MessageDoc{Name: "messageReceived", Payload: map[string]any{"type": "object"}},
+})
+
+app.Docs(express.DocsOptions{
+	Title:   "My API",
+	Version: "1.0.0",
+	Servers: []string{"https://api.example.com"},
+})
+```
+
+This mounts, by default:
+
+| Path             | Content                                         |
+| ---------------- | ----------------------------------------------- |
+| `/docs`          | Swagger UI                                       |
+| `/redoc`         | ReDoc                                            |
+| `/openapi.json`  | OpenAPI 3.1 specification (JSON)                  |
+| `/openapi.yaml`  | OpenAPI 3.1 specification (YAML)                  |
+| `/asyncapi.json` | AsyncAPI 2.6 document (event/socket channels)    |
+| `/postman.json`  | Postman v2.1 collection                          |
+
+Every path is configurable via `DocsOptions` (set any to `"-"` to disable), and
+an `Enrich` hook can customise each generated operation programmatically. The
+specs are rebuilt per request, so routes registered after `Docs()` still appear.
+You can also obtain the documents directly — `app.Routes()`, `app.OpenAPI()`,
+`app.OpenAPIYAML()`, `app.AsyncAPI()`, `app.PostmanCollection()` — to serve or
+persist them however you like.
+
 ## Using with net/http
 
 An `*express.Application` is an `http.Handler`, so it drops into anything that
