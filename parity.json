@@ -1,0 +1,10 @@
+{
+  "repo": "express",
+  "upstream": "expressjs/express",
+  "parityBefore": "73%",
+  "parityAfter": "100%",
+  "upstreamCasesSynced": 33,
+  "gapsFound": 9,
+  "gapsClosed": 9,
+  "asOf": "2026-07-18"
+}
