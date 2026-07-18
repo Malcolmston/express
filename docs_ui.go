@@ -1,6 +1,7 @@
 package express
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -8,52 +9,32 @@ import (
 	"strings"
 )
 
+//go:embed html/swagger-ui.html
+var swaggerUITemplate string
+
+//go:embed html/redoc.html
+var redocTemplate string
+
 // swaggerUIHTML returns a self-contained HTML page that renders Swagger UI for
 // the OpenAPI document at specURL, loading the Swagger UI assets from assetBase.
 func swaggerUIHTML(title, specURL, assetBase string) string {
-	base := strings.TrimRight(assetBase, "/") + "/swagger-ui-dist@5"
-	return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>` + htmlEscape(title) + ` — Swagger UI</title>
-<link rel="stylesheet" href="` + base + `/swagger-ui.css">
-</head>
-<body>
-<div id="swagger-ui"></div>
-<script src="` + base + `/swagger-ui-bundle.js" crossorigin></script>
-<script src="` + base + `/swagger-ui-standalone-preset.js" crossorigin></script>
-<script>
-window.ui = SwaggerUIBundle({
-  url: ` + jsString(specURL) + `,
-  dom_id: '#swagger-ui',
-  deepLinking: true,
-  presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
-  layout: 'StandaloneLayout'
-});
-</script>
-</body>
-</html>`
+	r := strings.NewReplacer(
+		"__TITLE__", htmlEscape(title),
+		"__ASSET_BASE__", strings.TrimRight(assetBase, "/"),
+		"__SPEC_URL_JSON__", jsString(specURL),
+	)
+	return r.Replace(swaggerUITemplate)
 }
 
 // redocHTML returns a self-contained HTML page that renders ReDoc for the
 // OpenAPI document at specURL, loading the ReDoc bundle from assetBase.
 func redocHTML(title, specURL, assetBase string) string {
-	base := strings.TrimRight(assetBase, "/") + "/redoc@2/bundles"
-	return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>` + htmlEscape(title) + ` — ReDoc</title>
-<style>body{margin:0;padding:0}</style>
-</head>
-<body>
-<redoc spec-url=` + htmlAttr(specURL) + `></redoc>
-<script src="` + base + `/redoc.standalone.js"></script>
-</body>
-</html>`
+	r := strings.NewReplacer(
+		"__TITLE__", htmlEscape(title),
+		"__ASSET_BASE__", strings.TrimRight(assetBase, "/"),
+		"__SPEC_URL_ATTR__", htmlAttr(specURL),
+	)
+	return r.Replace(redocTemplate)
 }
 
 // ---------------------------------------------------------------------------
