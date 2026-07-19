@@ -21,17 +21,20 @@
 // skewing toward the start of the alphabet the way a naive modulo would. Bytes
 // are requested from crypto/rand in batches sized to make rejections cheap.
 //
-// The default alphabet is the 64-character URL-safe set A–Z, a–z, 0–9, "_"
-// and "-" exposed as DefaultAlphabet, and the default length is DefaultSize
+// The default alphabet is the 64-character URL-safe set of A–Z, a–z, 0–9, "_"
+// and "-" exposed as DefaultAlphabet — the same characters, in the same
+// compression-friendly order, as the npm original's urlAlphabet — and the
+// default length is DefaultSize
 // (21), which gives a collision probability comparable to a v4 UUID. New
 // returns an id with those defaults; NewSize keeps the default alphabet but
 // lets you choose the length; and Custom lets you supply both a custom
 // alphabet and a custom size, for example to restrict ids to lowercase hex or
 // to trade length for a larger keyspace.
 //
-// The inputs are validated rather than silently coerced: a size that is zero
-// or negative, or an alphabet whose length is outside 1..256, produces an
-// error. Note that a shorter id or a smaller alphabet increases the chance of
+// The inputs are validated rather than silently coerced: a negative size, or
+// an alphabet whose length is outside 1..256, produces an error. A size of
+// zero yields the empty id (matching the original's nanoid(0) === "").
+// Note that a shorter id or a smaller alphabet increases the chance of
 // collisions, so those are trade-offs the caller makes deliberately. Compared
 // with the Node original the generation algorithm and default alphabet and
 // size are the same, and the output is the same kind of string; the main
@@ -47,8 +50,10 @@ import (
 	"math/bits"
 )
 
-// DefaultAlphabet is the URL-safe alphabet used by nanoid.
-const DefaultAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+// DefaultAlphabet is the URL-safe alphabet used by nanoid. It is the same
+// 64-character A-Za-z0-9_- set as the npm original's urlAlphabet, in the same
+// order (chosen to compress well under gzip and brotli).
+const DefaultAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict"
 
 // DefaultSize is the default id length.
 const DefaultSize = 21
@@ -66,8 +71,14 @@ func NewSize(size int) (string, error) {
 // Custom returns a nanoid using the given alphabet and size, sampling bytes
 // from crypto/rand with an unbiased mask/reject method.
 func Custom(alphabet string, size int) (string, error) {
-	if size <= 0 {
-		return "", errors.New("nanoid: size must be positive")
+	// Match the npm original: a negative size is an error ("Wrong ID size"),
+	// while a zero size yields the empty id without inspecting the alphabet
+	// (nanoid(0) === '', customAlphabet('')(0) === '', etc.).
+	if size < 0 {
+		return "", errors.New("nanoid: size must not be negative")
+	}
+	if size == 0 {
+		return "", nil
 	}
 	if len(alphabet) < 1 || len(alphabet) > 256 {
 		return "", errors.New("nanoid: alphabet length must be in 1..256")

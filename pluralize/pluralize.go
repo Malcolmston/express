@@ -216,6 +216,9 @@ func initIrregulars() {
 		{"this", "these"},
 		{"that", "those"},
 		{"my", "our"},
+		{"its", "their"},
+		{"his", "their"},
+		{"her", "their"},
 		{"echo", "echoes"},
 		{"dingo", "dingoes"},
 		{"volcano", "volcanoes"},
@@ -247,6 +250,7 @@ func initIrregulars() {
 		{"groove", "grooves"},
 		{"pickaxe", "pickaxes"},
 		{"passerby", "passersby"},
+		{"canvas", "canvases"},
 	}
 	for _, p := range pairs {
 		addIrregular(p[0], p[1])
@@ -322,11 +326,11 @@ func initUncountables() {
 		"firmware", "flounder", "fun", "gallows", "garbage", "graffiti",
 		"hardware", "headquarters", "health", "herpes", "highjinks", "homework",
 		"housework", "information", "jeans", "justice", "kudos", "labour",
-		"literature", "machinery", "mackerel", "mail", "media", "mews", "money",
+		"literature", "machinery", "mackerel", "mail", "media", "mews",
 		"moose", "music", "mud", "manga", "news", "only", "personnel", "pike",
 		"plankton", "pliers", "police", "pollution", "premises", "rain",
 		"research", "rice", "salmon", "scissors", "series", "sewage", "shambles",
-		"shrimp", "software", "species", "staff", "swine", "tennis", "traffic",
+		"shrimp", "software", "staff", "swine", "tennis", "traffic",
 		"transportation", "trout", "tuna", "wealth", "welfare", "whiting",
 		"wildebeest", "wildlife", "you",
 	}

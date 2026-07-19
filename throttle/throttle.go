@@ -67,14 +67,19 @@ type Timer interface {
 
 type realClock struct{}
 
+// Now implements Clock; it returns the current time from time.Now.
 func (realClock) Now() time.Time { return time.Now() }
 
+// AfterFunc implements Clock; it schedules fn to run after d using
+// time.AfterFunc and returns a Timer wrapping the resulting *time.Timer.
 func (realClock) AfterFunc(d time.Duration, fn func()) Timer {
 	return realTimer{time.AfterFunc(d, fn)}
 }
 
 type realTimer struct{ t *time.Timer }
 
+// Stop implements Timer; it stops the underlying *time.Timer and reports
+// whether the call was stopped before it fired.
 func (r realTimer) Stop() bool { return r.t.Stop() }
 
 // Option configures a Throttler.

@@ -55,16 +55,17 @@ import (
 
 // Millisecond magnitudes for each supported unit.
 const (
-	msPerMs   = 1.0
-	msPerSec  = 1000.0
-	msPerMin  = msPerSec * 60
-	msPerHour = msPerMin * 60
-	msPerDay  = msPerHour * 24
-	msPerWeek = msPerDay * 7
-	msPerYear = msPerDay * 365.25
+	msPerMs    = 1.0
+	msPerSec   = 1000.0
+	msPerMin   = msPerSec * 60
+	msPerHour  = msPerMin * 60
+	msPerDay   = msPerHour * 24
+	msPerWeek  = msPerDay * 7
+	msPerYear  = msPerDay * 365.25
+	msPerMonth = msPerYear / 12
 )
 
-var parseRE = regexp.MustCompile(`(?i)^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$`)
+var parseRE = regexp.MustCompile(`(?i)^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$`)
 
 // Parse converts a human readable duration string such as "2h", "1d",
 // "-1.5h", "100" or "2.5 days" into a time.Duration. A bare number is
@@ -109,17 +110,25 @@ var unitFactors = map[string]float64{
 	"hour": msPerHour, "hours": msPerHour,
 	"d": msPerDay, "day": msPerDay, "days": msPerDay,
 	"w": msPerWeek, "week": msPerWeek, "weeks": msPerWeek,
+	"mo": msPerMonth, "month": msPerMonth, "months": msPerMonth,
 	"y": msPerYear, "yr": msPerYear, "yrs": msPerYear,
 	"year": msPerYear, "years": msPerYear,
 }
 
 // Format returns the short human readable form of d, choosing the largest
-// unit whose magnitude is at least one: days ("d"), hours ("h"), minutes
-// ("m"), seconds ("s") or milliseconds ("ms").
+// unit whose magnitude is at least one: years ("y"), months ("mo"), weeks
+// ("w"), days ("d"), hours ("h"), minutes ("m"), seconds ("s") or
+// milliseconds ("ms").
 func Format(d time.Duration) string {
 	msVal := float64(d) / float64(time.Millisecond)
 	abs := math.Abs(msVal)
 	switch {
+	case abs >= msPerYear:
+		return roundStr(msVal/msPerYear) + "y"
+	case abs >= msPerMonth:
+		return roundStr(msVal/msPerMonth) + "mo"
+	case abs >= msPerWeek:
+		return roundStr(msVal/msPerWeek) + "w"
 	case abs >= msPerDay:
 		return roundStr(msVal/msPerDay) + "d"
 	case abs >= msPerHour:
@@ -139,6 +148,12 @@ func FormatLong(d time.Duration) string {
 	msVal := float64(d) / float64(time.Millisecond)
 	abs := math.Abs(msVal)
 	switch {
+	case abs >= msPerYear:
+		return plural(msVal, abs, msPerYear, "year")
+	case abs >= msPerMonth:
+		return plural(msVal, abs, msPerMonth, "month")
+	case abs >= msPerWeek:
+		return plural(msVal, abs, msPerWeek, "week")
 	case abs >= msPerDay:
 		return plural(msVal, abs, msPerDay, "day")
 	case abs >= msPerHour:

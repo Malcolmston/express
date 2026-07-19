@@ -21,18 +21,22 @@
 // that were never encoded, and additionally strips one layer of surrounding
 // double quotes so quoted-string cookie values round-trip. When the same cookie
 // name appears more than once in a header the first occurrence wins, matching the
-// npm package, and pairs with an empty name or no '=' are skipped.
+// npm package, and pairs with no '=' are skipped. A pair whose name is empty is
+// retained (so " = bar " parses to {"": "bar"}), matching the npm package.
 //
 // Serialize validates its inputs rather than emitting a header that a client
 // would reject. The name must be an RFC 6265 token and the encoded value must be
-// a valid cookie-octet sequence, otherwise an error is returned; Path and Domain
-// must be valid field-content. Max-Age follows net/http conventions rather than
+// a valid cookie-octet sequence, otherwise an error is returned; Path must be
+// free of controls, ";" and "<", and Domain must be a valid RFC 6265 domain
+// value. Max-Age follows net/http conventions rather than
 // dotenv-style literalism: a positive value sets Max-Age to that many seconds, a
 // negative value emits "Max-Age=0" to delete the cookie immediately, and zero
 // omits the attribute entirely. A zero Expires time omits Expires, and an empty
 // SameSite omits SameSite while "Lax", "Strict", and "None" (case-insensitive)
-// are accepted and anything else is an error. Passing a nil *Options serializes
-// just the name and value with no attributes.
+// are accepted and anything else is an error. Priority accepts "Low", "Medium",
+// and "High" (case-insensitive), omitting the attribute when empty and erroring
+// otherwise, and Partitioned emits the Partitioned attribute. Passing a nil
+// *Options serializes just the name and value with no attributes.
 //
 // Parity with the Node original is close for everyday cookie handling: the
 // encodeURIComponent-based value codec, the token and cookie-octet validation,
@@ -49,10 +53,18 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// domainValueRegexp matches a valid Domain attribute value per RFC 6265,
+// ported from the upstream jshttp/cookie domainValueRegExp (a leading dot is
+// permitted; each label must start and end with a let-dig and be at most 63
+// characters).
+var domainValueRegexp = regexp.MustCompile(
+	`^(?i)([.]?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 
 // Options holds the attributes used when serializing a cookie.
 type Options struct {
@@ -70,6 +82,11 @@ type Options struct {
 	Secure bool
 	// HttpOnly sets the HttpOnly attribute.
 	HttpOnly bool
+	// Partitioned sets the Partitioned attribute.
+	Partitioned bool
+	// Priority sets the Priority attribute; recognized values are "Low",
+	// "Medium", and "High" (case-insensitive). An empty value omits it.
+	Priority string
 	// SameSite sets the SameSite attribute; recognized values are "Lax",
 	// "Strict", and "None" (case-insensitive). An empty value omits it.
 	SameSite string
@@ -90,9 +107,6 @@ func Parse(header string) map[string]string {
 			continue
 		}
 		name := strings.TrimSpace(pair[:eq])
-		if name == "" {
-			continue
-		}
 		if _, exists := m[name]; exists {
 			continue
 		}
@@ -129,7 +143,7 @@ func Serialize(name, value string, opts *Options) (string, error) {
 	}
 
 	if opts.Path != "" {
-		if !isFieldContent(opts.Path) {
+		if !isPathValue(opts.Path) {
 			return "", errors.New("cookie: path is invalid")
 		}
 		b.WriteString("; Path=")
@@ -137,7 +151,7 @@ func Serialize(name, value string, opts *Options) (string, error) {
 	}
 
 	if opts.Domain != "" {
-		if !isFieldContent(opts.Domain) {
+		if !domainValueRegexp.MatchString(opts.Domain) {
 			return "", errors.New("cookie: domain is invalid")
 		}
 		b.WriteString("; Domain=")
@@ -164,6 +178,23 @@ func Serialize(name, value string, opts *Options) (string, error) {
 
 	if opts.Secure {
 		b.WriteString("; Secure")
+	}
+
+	if opts.Partitioned {
+		b.WriteString("; Partitioned")
+	}
+
+	switch strings.ToLower(opts.Priority) {
+	case "":
+		// omit
+	case "low":
+		b.WriteString("; Priority=Low")
+	case "medium":
+		b.WriteString("; Priority=Medium")
+	case "high":
+		b.WriteString("; Priority=High")
+	default:
+		return "", errors.New("cookie: priority is invalid")
 	}
 
 	switch strings.ToLower(opts.SameSite) {
@@ -264,12 +295,13 @@ func isCookieValue(s string) bool {
 	return true
 }
 
-// isFieldContent reports whether s is valid for an attribute value such as
-// Path or Domain (RFC 7230 field-content, roughly printable characters).
-func isFieldContent(s string) bool {
+// isPathValue reports whether s is a valid Path attribute value, matching the
+// upstream jshttp/cookie pathValueRegExp: any CHAR except CTLs, ";" (0x3B),
+// and "<" (0x3C).
+func isPathValue(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if c == 0x09 || (c >= 0x20 && c <= 0x7E) || c >= 0x80 {
+		if (c >= 0x20 && c <= 0x3A) || (c >= 0x3D && c <= 0x7E) {
 			continue
 		}
 		return false

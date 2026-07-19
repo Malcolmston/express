@@ -9,7 +9,8 @@ func TestBasic(t *testing.T) {
 }
 
 func TestLowerAndAccents(t *testing.T) {
-	if got := Slugify("Héllo World!", Options{Lower: true}); got != "hello-world" {
+	// "!" is in the default allowed set (matching npm slugify), so it survives.
+	if got := Slugify("Héllo World!", Options{Lower: true}); got != "hello-world!" {
 		t.Errorf("got %q", got)
 	}
 }

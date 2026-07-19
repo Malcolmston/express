@@ -80,6 +80,9 @@ type captureWriter struct {
 	wroteHeader bool
 }
 
+// WriteHeader implements http.ResponseWriter; it records the first status code
+// without writing it to the client so the header can be sent later once the
+// buffered body is compressed.
 func (w *captureWriter) WriteHeader(code int) {
 	if !w.wroteHeader {
 		w.status = code
@@ -87,6 +90,8 @@ func (w *captureWriter) WriteHeader(code int) {
 	}
 }
 
+// Write implements http.ResponseWriter; it buffers p in memory (defaulting the
+// status to 200 on first write) instead of writing to the client immediately.
 func (w *captureWriter) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)

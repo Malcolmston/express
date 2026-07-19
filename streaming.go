@@ -48,6 +48,8 @@ func (res *Response) WriteString(s string) (int, error) {
 // flushWriter is an io.Writer that flushes to the client after every write.
 type flushWriter struct{ res *Response }
 
+// Write implements io.Writer; it writes p as a response chunk via WriteChunk,
+// flushing the data to the client after the write.
 func (w flushWriter) Write(p []byte) (int, error) { return w.res.WriteChunk(p) }
 
 // Flush flushes the underlying response.

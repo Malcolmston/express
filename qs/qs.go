@@ -26,7 +26,12 @@
 //
 // Keys and values are URL-decoded on parse and URL-encoded on stringify. A
 // leading "?" is ignored by Parse, empty pairs are skipped, and a key with no
-// "=" is treated as having an empty-string value. Stringify is the inverse of
+// "=" is treated as having an empty-string value. Percent-encoded brackets
+// (%5B/%5D) are normalized to literal brackets before the key path is split, so
+// "a%5Bb%5D=c" nests the same as "a[b]=c". Following upstream's default
+// "combine" duplicate handling, a repeated key gathers its values into an array
+// ("a=b&a=c" yields {"a":["b","c"]}) rather than the later value overwriting the
+// earlier one. Stringify is the inverse of
 // Parse for the documented cases: nested maps become bracketed keys, slices
 // become repeated "[]" entries, and both the top-level keys and every nested
 // object's keys are emitted in sorted order so output is deterministic and
@@ -60,15 +65,30 @@ func Parse(s string) map[string]any {
 		return root
 	}
 
+	// Match upstream qs: percent-encoded brackets are normalized to literal
+	// brackets before the key path is split, so "a%5Bb%5D=c" nests the same as
+	// "a[b]=c". qs does this replacement over the whole string, case-insensitively.
+	s = normalizeBrackets(s)
+
 	for _, pair := range strings.Split(s, "&") {
 		if pair == "" {
 			continue
 		}
 
+		// Locate the value separator the way upstream qs does: prefer the "]="
+		// that terminates a bracket group so keys may contain '=' (e.g.
+		// "a[<=>]==23" splits into key "a[<=>]" and value "=23"), falling back to
+		// the first '=' otherwise.
 		var rawKey, rawVal string
-		if eq := strings.IndexByte(pair, '='); eq >= 0 {
-			rawKey = pair[:eq]
-			rawVal = pair[eq+1:]
+		pos := -1
+		if b := strings.Index(pair, "]="); b >= 0 {
+			pos = b + 1
+		} else {
+			pos = strings.IndexByte(pair, '=')
+		}
+		if pos >= 0 {
+			rawKey = pair[:pos]
+			rawVal = pair[pos+1:]
 		} else {
 			rawKey = pair
 		}
@@ -90,7 +110,18 @@ func Parse(s string) map[string]any {
 // within the existing node, creating maps and slices as needed.
 func merge(existing any, segments []string, value any) any {
 	if len(segments) == 0 {
-		return value
+		// Upstream qs defaults to duplicates: "combine": when the same key path
+		// is seen more than once, the values are gathered into an array rather
+		// than the later value clobbering the earlier one. So "a=b&a=c" and
+		// "foo=bar&foo=baz" produce arrays, and an object seen before a scalar
+		// ("a[b]=c&a=d") is wrapped alongside it: [{b:"c"}, "d"].
+		if existing == nil {
+			return value
+		}
+		if arr, ok := existing.([]any); ok {
+			return append(arr, value)
+		}
+		return []any{existing, value}
 	}
 
 	seg := segments[0]
@@ -98,8 +129,15 @@ func merge(existing any, segments []string, value any) any {
 
 	if seg == "" {
 		var arr []any
-		if e, ok := existing.([]any); ok {
+		switch e := existing.(type) {
+		case []any:
 			arr = e
+		case nil:
+			// leave arr nil
+		default:
+			// A scalar (or object) was recorded before an explicit "[]" push,
+			// e.g. "a=b&a[]=c"; seed the array with it so both values survive.
+			arr = []any{e}
 		}
 		return append(arr, merge(nil, rest, value))
 	}
@@ -139,6 +177,21 @@ func parseSegments(rawKey string) []string {
 	}
 
 	return segments
+}
+
+// normalizeBrackets replaces percent-encoded square brackets (%5B / %5D, in any
+// letter case) with their literal forms, matching upstream qs, which performs
+// this substitution over the whole query string before splitting keys so that
+// encoded and unencoded bracket notation parse identically.
+func normalizeBrackets(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "%5B", "[")
+	s = strings.ReplaceAll(s, "%5b", "[")
+	s = strings.ReplaceAll(s, "%5D", "]")
+	s = strings.ReplaceAll(s, "%5d", "]")
+	return s
 }
 
 // decode URL-decodes s, returning it unchanged if it is not valid encoding.

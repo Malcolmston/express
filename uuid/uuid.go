@@ -46,7 +46,17 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"regexp"
 )
+
+// uuidRegexp mirrors the upstream npm "uuid" validation regex
+// (src/regex.ts): a canonical 8-4-4-4-12 string whose version nibble is one
+// of 1-8 and whose variant nibble is one of 8, 9, a, or b, plus the two
+// special-case constants NIL (all zeros) and MAX (all fs). Matching is
+// case-insensitive. Strings outside this grammar - including well-formed hex
+// with an out-of-range version or variant - are rejected, exactly as upstream
+// validate()/parse() reject them.
+var uuidRegexp = regexp.MustCompile(`(?i)^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$`)
 
 // Predefined namespace UUIDs from RFC 4122, used with V3 and V5.
 const (
@@ -95,11 +105,8 @@ func V5(namespace string, name string) (string, error) {
 // Parse parses a UUID string into a 16-byte array.
 func Parse(s string) ([16]byte, error) {
 	var b [16]byte
-	if len(s) != 36 {
-		return b, errors.New("uuid: invalid length")
-	}
-	if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
-		return b, errors.New("uuid: invalid format")
+	if !uuidRegexp.MatchString(s) {
+		return b, errors.New("uuid: invalid UUID")
 	}
 	stripped := s[0:8] + s[9:13] + s[14:18] + s[19:23] + s[24:36]
 	decoded, err := hex.DecodeString(stripped)
@@ -116,8 +123,10 @@ func Format(b [16]byte) string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// Validate reports whether s is a well-formed UUID string.
+// Validate reports whether s is a well-formed UUID string. It matches the
+// upstream npm "uuid" validate(): the string must be a canonical 8-4-4-4-12
+// form with a version nibble in 1-8 and a variant nibble in [89ab], or be the
+// NIL or MAX constant. Out-of-range versions/variants are rejected.
 func Validate(s string) bool {
-	_, err := Parse(s)
-	return err == nil
+	return uuidRegexp.MatchString(s)
 }

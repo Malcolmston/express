@@ -11,11 +11,13 @@ import (
 // separator, and does not lowercase, matching the npm defaults. Punctuation
 // that is neither a word character nor whitespace is removed, whitespace runs
 // collapse into a single separator, and no doubled separator survives. Here the
-// comma and exclamation mark are dropped and the space becomes a hyphen. Note
-// that casing is preserved because lowercasing is off by default.
+// comma is dropped and the space becomes a hyphen. Note
+// that casing is preserved because lowercasing is off by default. The comma is
+// dropped because it is not in the allowed set, while the exclamation mark is
+// kept: like npm slugify, the default allowed punctuation is $*_+~.()'"!-:@.
 func ExampleSlugify() {
 	fmt.Println(slugify.Slugify("Hello, World!"))
-	// Output: Hello-World
+	// Output: Hello-World!
 }
 
 // ExampleSlugify_transliterate shows Unicode transliteration together with the

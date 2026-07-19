@@ -63,5 +63,5 @@ func ExampleExtension() {
 func ExampleCharset() {
 	cs, ok := mimetypes.Charset("application/json")
 	fmt.Println(cs, ok)
-	// Output: utf-8 true
+	// Output: UTF-8 true
 }

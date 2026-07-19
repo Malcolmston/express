@@ -172,6 +172,7 @@ func unauthorized(res *express.Response) {
 
 type jwtError string
 
+// Error implements the error interface; it returns the underlying string.
 func (e jwtError) Error() string { return string(e) }
 
 const (

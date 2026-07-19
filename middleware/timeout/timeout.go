@@ -83,8 +83,14 @@ type handlerWriter struct {
 	g    *respGuard
 }
 
+// Header implements http.ResponseWriter; it returns the handler's private
+// header map rather than the underlying ResponseWriter's headers.
 func (w *handlerWriter) Header() http.Header { return w.hdr }
 
+// WriteHeader implements http.ResponseWriter; it claims the response guard and,
+// if the handler wins the race with the timeout, copies the buffered headers to
+// the underlying ResponseWriter and writes the status code. Otherwise it is a
+// no-op.
 func (w *handlerWriter) WriteHeader(code int) {
 	if w.g.claim(1) {
 		copyHeader(w.orig.Header(), w.hdr)
@@ -92,6 +98,10 @@ func (w *handlerWriter) WriteHeader(code int) {
 	}
 }
 
+// Write implements http.ResponseWriter; it writes b to the underlying
+// ResponseWriter when the handler wins the response guard, and otherwise
+// discards b (reporting it as fully written) so a timed-out handler cannot race
+// the timeout writer.
 func (w *handlerWriter) Write(b []byte) (int, error) {
 	if w.g.claim(1) {
 		return w.orig.Write(b)

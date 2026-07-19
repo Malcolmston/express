@@ -50,6 +50,18 @@ import (
 // input is not a valid semantic version.
 var ErrInvalidVersion = errors.New("semver: invalid version")
 
+const (
+	// semMaxLength bounds the accepted length of a version string, mirroring
+	// node-semver's MAX_LENGTH.
+	semMaxLength = 256
+	// semMaxSafeInteger is the largest value a numeric field may take, mirroring
+	// JavaScript's Number.MAX_SAFE_INTEGER used by node-semver.
+	semMaxSafeInteger uint64 = 9007199254740991
+	// semMaxSafeComponentLength is the maximum digit length coercion will accept
+	// for a single numeric component, mirroring MAX_SAFE_COMPONENT_LENGTH.
+	semMaxSafeComponentLength = 16
+)
+
 // Version is a parsed semantic version. The zero Version is 0.0.0 with no
 // prerelease or build identifiers.
 type Version struct {
@@ -70,6 +82,9 @@ type Version struct {
 // "=" and surrounding whitespace. It returns ErrInvalidVersion (wrapped) when
 // the string is not a valid version.
 func Parse(s string) (*Version, error) {
+	if len(s) > semMaxLength {
+		return nil, fmt.Errorf("%w: too long", ErrInvalidVersion)
+	}
 	raw := strings.TrimSpace(s)
 	raw = strings.TrimPrefix(raw, "=")
 	raw = strings.TrimSpace(raw)
@@ -122,6 +137,9 @@ func Parse(s string) (*Version, error) {
 		n, err := strconv.ParseUint(p, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidVersion, err)
+		}
+		if n > semMaxSafeInteger {
+			return nil, fmt.Errorf("%w: numeric field %q too big", ErrInvalidVersion, p)
 		}
 		nums[i] = n
 	}
@@ -201,15 +219,25 @@ func (v *Version) GreaterThan(o *Version) bool { return v.Compare(o) > 0 }
 func (v *Version) Equal(o *Version) bool { return v.Compare(o) == 0 }
 
 // IncMajor returns a new version with Major incremented and the lower fields,
-// prerelease and build metadata cleared.
+// prerelease and build metadata cleared. A pre-major version (X.0.0-pre) is
+// promoted to X.0.0 without incrementing Major, matching npm semver.
 func (v *Version) IncMajor() *Version {
-	return &Version{Major: v.Major + 1}
+	major := v.Major
+	if v.Minor != 0 || v.Patch != 0 || len(v.Prerelease) == 0 {
+		major++
+	}
+	return &Version{Major: major}
 }
 
 // IncMinor returns a new version with Minor incremented, Patch cleared and
-// prerelease and build metadata cleared.
+// prerelease and build metadata cleared. A pre-minor version (X.Y.0-pre) is
+// promoted to X.Y.0 without incrementing Minor, matching npm semver.
 func (v *Version) IncMinor() *Version {
-	return &Version{Major: v.Major, Minor: v.Minor + 1}
+	minor := v.Minor
+	if v.Patch != 0 || len(v.Prerelease) == 0 {
+		minor++
+	}
+	return &Version{Major: v.Major, Minor: minor}
 }
 
 // IncPatch returns a new version with Patch incremented and prerelease and
@@ -322,45 +350,84 @@ func Inc(s, release string) (string, error) {
 // default to zero, so "v2" becomes "2.0.0" and "1.2.x build" becomes "1.2.0".
 // It returns ErrInvalidVersion when no numeric component is found.
 func Coerce(s string) (string, error) {
+	// Mirror node-semver's COERCE regex (default: no rtl, no includePrerelease):
+	//   (^|[^\d])(\d{1,16})(?:\.(\d{1,16}))?(?:\.(\d{1,16}))?(?:$|[^\d])
+	// i.e. find the leftmost run of at most three dot-separated numeric
+	// components, each 1..16 digits, where the whole match is bounded by
+	// non-digits (or the string ends). A digit run longer than 16 digits is not
+	// matched and is skipped over entirely.
+	n := len(s)
 	i := 0
-	for i < len(s) && (s[i] < '0' || s[i] > '9') {
-		i++
-	}
-	if i >= len(s) {
-		return "", fmt.Errorf("%w: no numeric component", ErrInvalidVersion)
-	}
-	fields := make([]uint64, 0, 3)
-	for len(fields) < 3 && i < len(s) {
-		if s[i] < '0' || s[i] > '9' {
-			break
+	for i < n {
+		if !semIsDigitByte(s[i]) {
+			i++
+			continue
 		}
+		// i is the start of a maximal digit run (i == 0 or s[i-1] is non-digit).
 		j := i
-		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		for j < n && semIsDigitByte(s[j]) {
 			j++
 		}
-		n, err := strconv.ParseUint(s[i:j], 10, 64)
-		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrInvalidVersion, err)
+		if j-i > semMaxSafeComponentLength {
+			// too-long component: skip the entire run and keep scanning.
+			i = j
+			continue
 		}
-		fields = append(fields, n)
-		i = j
-		if i < len(s) && s[i] == '.' {
-			i++
-		} else {
-			break
+		major := s[i:j]
+		minor, patch := "", ""
+		k := j
+		if k < n && s[k] == '.' && k+1 < n && semIsDigitByte(s[k+1]) {
+			m := k + 1
+			for m < n && semIsDigitByte(s[m]) {
+				m++
+			}
+			if m-(k+1) <= semMaxSafeComponentLength {
+				minor = s[k+1 : m]
+				k = m
+				if k < n && s[k] == '.' && k+1 < n && semIsDigitByte(s[k+1]) {
+					p := k + 1
+					for p < n && semIsDigitByte(s[p]) {
+						p++
+					}
+					if p-(k+1) <= semMaxSafeComponentLength {
+						patch = s[k+1 : p]
+					}
+				}
+			}
 		}
+		v := &Version{}
+		var err error
+		if v.Major, err = semCoerceField(major); err != nil {
+			return "", err
+		}
+		if v.Minor, err = semCoerceField(minor); err != nil {
+			return "", err
+		}
+		if v.Patch, err = semCoerceField(patch); err != nil {
+			return "", err
+		}
+		return v.String(), nil
 	}
-	v := &Version{}
-	if len(fields) > 0 {
-		v.Major = fields[0]
+	return "", fmt.Errorf("%w: no numeric component", ErrInvalidVersion)
+}
+
+func semIsDigitByte(c byte) bool { return c >= '0' && c <= '9' }
+
+// semCoerceField parses a coerced numeric component (empty means 0) and rejects
+// values above MAX_SAFE_INTEGER, mirroring parse() failing on an out-of-range
+// component.
+func semCoerceField(s string) (uint64, error) {
+	if s == "" {
+		return 0, nil
 	}
-	if len(fields) > 1 {
-		v.Minor = fields[1]
+	nv, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrInvalidVersion, err)
 	}
-	if len(fields) > 2 {
-		v.Patch = fields[2]
+	if nv > semMaxSafeInteger {
+		return 0, fmt.Errorf("%w: numeric field %q too big", ErrInvalidVersion, s)
 	}
-	return v.String(), nil
+	return nv, nil
 }
 
 // --- comparison helpers -----------------------------------------------------

@@ -398,8 +398,12 @@ type gzipResponseWriter struct {
 	gz *gzip.Writer
 }
 
+// Write implements http.ResponseWriter; it writes b through the gzip writer so
+// the response body is gzip-encoded.
 func (w *gzipResponseWriter) Write(b []byte) (int, error) { return w.gz.Write(b) }
 
+// Flush implements http.Flusher; it flushes the gzip writer and then flushes
+// the underlying ResponseWriter when it supports flushing.
 func (w *gzipResponseWriter) Flush() {
 	_ = w.gz.Flush()
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
