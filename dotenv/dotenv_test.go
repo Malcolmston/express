@@ -65,7 +65,11 @@ func TestParseTrailingComment(t *testing.T) {
 
 func TestParseBlankAndInvalid(t *testing.T) {
 	m, _ := Parse(strings.NewReader("\n\n   \nNOEQUALS\n=noKey\nGOOD=1\n"))
-	if len(m) != 1 || m["GOOD"] != "1" {
+	// Upstream dotenv's key/value separator is `\s*=`, whose `\s*` spans the
+	// newline between "NOEQUALS" and "=noKey", so those two physical lines parse
+	// as the single assignment NOEQUALS=noKey (verified against motdotla/dotenv
+	// lib/main.js). The bare "=noKey" therefore is not a standalone entry.
+	if len(m) != 2 || m["GOOD"] != "1" || m["NOEQUALS"] != "noKey" {
 		t.Errorf("unexpected map: %#v", m)
 	}
 }

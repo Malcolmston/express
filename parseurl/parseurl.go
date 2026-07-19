@@ -44,6 +44,7 @@ package parseurl
 import (
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Parse parses the request's effective URL, using req.RequestURI and falling
@@ -57,10 +58,27 @@ func Parse(req *http.Request) *url.URL {
 	if raw == "" {
 		return req.URL
 	}
+	// Match upstream parseurl, which delegates to Node's url.parse for any
+	// target containing whitespace or a fragment: url.parse trims surrounding
+	// whitespace and splits off the #fragment so it is excluded from pathname,
+	// query and search. Go's url.ParseRequestURI does neither (it treats "#"
+	// and spaces as ordinary path/query bytes), so normalise those here. This
+	// also matches url.ParseRequestURI's own documented assumption that the
+	// input carries no "#fragment" suffix.
+	raw = strings.TrimSpace(raw)
+	frag := ""
+	if i := strings.IndexByte(raw, '#'); i >= 0 {
+		frag = raw[i+1:]
+		raw = raw[:i]
+	}
 	if u, err := url.ParseRequestURI(raw); err == nil {
+		u.Fragment = frag
 		return u
 	}
 	if u, err := url.Parse(raw); err == nil {
+		if frag != "" {
+			u.Fragment = frag
+		}
 		return u
 	}
 	return req.URL

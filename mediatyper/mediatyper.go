@@ -90,6 +90,21 @@ func isTChar(c byte) bool {
 	return false
 }
 
+// isText reports whether s contains only characters allowed inside a
+// parameter's quoted-string value: any byte in 0x20-0x7e or 0x80-0xff.
+// Control characters (0x00-0x1f) and DEL (0x7f) are rejected. This mirrors the
+// upstream media-typer textRegExp used by qstring to validate a value that is
+// not a bare token before it is quoted.
+func isText(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // quoteValue wraps a parameter value in a quoted-string if it is not a valid
 // token.
 func quoteValue(v string) string {
@@ -140,10 +155,17 @@ func Format(m MediaType) (string, error) {
 		if !isToken(k) {
 			return "", errors.New("invalid parameter name")
 		}
+		v := m.Parameters[k]
+		// A value that is neither a bare token nor a valid (possibly empty)
+		// quotable text string is rejected, matching upstream qstring which
+		// throws on values containing control characters such as NUL.
+		if !isToken(v) && v != "" && !isText(v) {
+			return "", errors.New("invalid parameter value")
+		}
 		b.WriteString("; ")
 		b.WriteString(strings.ToLower(k))
 		b.WriteByte('=')
-		b.WriteString(quoteValue(m.Parameters[k]))
+		b.WriteString(quoteValue(v))
 	}
 	return b.String(), nil
 }

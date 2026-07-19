@@ -80,6 +80,9 @@ type spec struct {
 	order  int // original position, used for stable ordering
 	// index of the matched available value, used when negotiating
 	index int
+	// s is the specificity of the match (how concretely the accept entry
+	// matched the available value); higher is more specific.
+	s int
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +140,7 @@ func parseAccept(header string) []spec {
 	if strings.TrimSpace(header) == "" {
 		header = "*/*"
 	}
-	for i, part := range splitComma(header) {
+	for i, part := range splitMediaTypes(header) {
 		typ, subtyp, params, q, ok := parseMediaRange(part)
 		if !ok {
 			continue
@@ -180,9 +183,12 @@ func parseMediaRange(s string) (typ, subtyp string, params map[string]string, q 
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				q = f
 			}
-		} else {
-			params[key] = val
+			// Parameters after "q" are accept-extension parameters and are
+			// not part of the media type for matching purposes (mirrors the
+			// upstream negotiator, which only reads params preceding q).
+			break
 		}
+		params[key] = val
 	}
 	return typ, subtyp, params, q, true
 }
@@ -229,6 +235,9 @@ func bestMediaMatch(accepts []spec, available string) (spec, bool) {
 			best = a
 			found = true
 		}
+	}
+	if found {
+		best.s = bestScore
 	}
 	return best, found
 }
@@ -299,6 +308,9 @@ func bestLanguageMatch(accepts []spec, available string) (spec, bool) {
 			best = a
 			found = true
 		}
+	}
+	if found {
+		best.s = bestScore
 	}
 	return best, found
 }
@@ -435,13 +447,16 @@ func bestSimpleMatch(accepts []spec, available string) (spec, bool) {
 			found = true
 		}
 	}
+	if found {
+		best.s = bestScore
+	}
 	return best, found
 }
 
 func simpleAll(accepts []spec) []string {
 	var full []spec
 	for _, a := range accepts {
-		if a.q > 0 && a.value != "*" {
+		if a.q > 0 {
 			full = append(full, a)
 		}
 	}
@@ -467,14 +482,23 @@ func sortSpecs(specs []spec) {
 	})
 }
 
-// sortSpecsByMatch sorts matched specs by descending q, stable by the index of
-// the available value (preserving the caller's ordering on ties).
+// sortSpecsByMatch sorts matched specs the way the upstream negotiator does:
+// by descending quality, then descending specificity of the match, then
+// ascending order of the client's accept entry, and finally ascending index of
+// the available value (which preserves the caller's ordering on full ties).
 func sortSpecsByMatch(specs []spec) {
 	sort.SliceStable(specs, func(i, j int) bool {
-		if specs[i].q != specs[j].q {
-			return specs[i].q > specs[j].q
+		a, b := specs[i], specs[j]
+		if a.q != b.q {
+			return a.q > b.q
 		}
-		return specs[i].index < specs[j].index
+		if a.s != b.s {
+			return a.s > b.s
+		}
+		if a.order != b.order {
+			return a.order < b.order
+		}
+		return a.index < b.index
 	})
 }
 
@@ -488,4 +512,31 @@ func splitComma(s string) []string {
 		}
 	}
 	return out
+}
+
+// splitMediaTypes splits an Accept header on commas, but rejoins segments whose
+// commas fall inside a quoted parameter value (e.g. text/html;foo="a,b"). This
+// mirrors the quote-count logic in the upstream negotiator's splitMediaTypes.
+func splitMediaTypes(header string) []string {
+	raw := strings.Split(header, ",")
+	joined := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if n := len(joined); n > 0 && quoteCount(joined[n-1])%2 == 1 {
+			joined[n-1] += "," + part
+		} else {
+			joined = append(joined, part)
+		}
+	}
+	out := make([]string, 0, len(joined))
+	for _, p := range joined {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func quoteCount(s string) int {
+	return strings.Count(s, "\"")
 }

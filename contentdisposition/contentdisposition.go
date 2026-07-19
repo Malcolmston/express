@@ -16,17 +16,18 @@
 // filename parameter, escaping embedded quotes and backslashes. When the name
 // contains bytes above 0x7f it additionally emits an RFC 5987 filename*
 // parameter: the value is prefixed with "UTF-8”" and every byte outside the
-// RFC 5987 attr-char set is percent-encoded with lower-case hex. By default a
+// RFC 5987 attr-char set is percent-encoded with upper-case hex. By default a
 // legacy filename parameter is emitted alongside it as an ASCII fallback, built
-// by replacing each non-ASCII byte with '?'; WithFallback(false) suppresses
+// by replacing each non-ASCII character with '?'; WithFallback(false) suppresses
 // that fallback, and WithType selects the disposition type (default
 // "attachment").
 //
 // Parse splits the header on unquoted semicolons, lower-cases the disposition
 // type and each parameter name, and unescapes quoted-string values. A
 // parameter whose name ends in "*" is treated as an RFC 5987 ext-value and
-// decoded from its charset'lang'percent-encoded form; only the "utf-8" and
-// "iso-8859-1" charsets are accepted and any other charset, or a malformed
+// decoded from its charset'lang'percent-encoded form; only the "utf-8" (and
+// its legacy "utf8" alias) and "iso-8859-1" charsets are accepted and any
+// other charset, or a malformed
 // percent escape, produces an error. When both a filename and a filename*
 // parameter are present the decoded extended value wins and is stored under the
 // "filename" key, matching the precedence browsers apply. An empty or
@@ -108,8 +109,10 @@ func attrChar(c byte) bool {
 }
 
 // encodeExtValue percent-encodes s per RFC 5987 (ext-value) with UTF-8.
+// Upstream encodes with upper-case hex digits (via encodeURIComponent), so
+// this port matches that casing byte-for-byte.
 func encodeExtValue(s string) string {
-	const hex = "0123456789abcdef"
+	const hex = "0123456789ABCDEF"
 	var b strings.Builder
 	b.WriteString("UTF-8''")
 	for i := 0; i < len(s); i++ {
@@ -140,17 +143,37 @@ func quoteString(s string) string {
 	return b.String()
 }
 
-// asciiFallback replaces non-ASCII bytes with '?' to build a legacy filename.
+// asciiFallback replaces every non-printable-ASCII character with '?' to build
+// a legacy filename. Upstream (getAscii) operates per Unicode character, not
+// per byte, so a single multi-byte rune collapses to a single '?'.
 func asciiFallback(s string) string {
 	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] > 0x7f {
+	for _, r := range s {
+		if r < 0x20 || r > 0x7e {
 			b.WriteByte('?')
 		} else {
-			b.WriteByte(s[i])
+			b.WriteByte(byte(r))
 		}
 	}
 	return b.String()
+}
+
+// hexDigit reports whether c is an ASCII hex digit.
+func hexDigit(c byte) bool {
+	_, ok := hexVal(c)
+	return ok
+}
+
+// containsHexEscape reports whether s contains a "%" followed by two hex
+// digits, matching upstream's INVALID_FILENAME_REGEXP. Such an ASCII filename
+// still gets a filename* parameter so the escape is not misread on decode.
+func containsHexEscape(s string) bool {
+	for i := 0; i+2 < len(s); i++ {
+		if s[i] == '%' && hexDigit(s[i+1]) && hexDigit(s[i+2]) {
+			return true
+		}
+	}
+	return false
 }
 
 // Format builds a Content-Disposition header value for the given filename.
@@ -170,7 +193,7 @@ func Format(filename string, opts ...Option) string {
 		return b.String()
 	}
 
-	if isASCII(filename) {
+	if isASCII(filename) && !containsHexEscape(filename) {
 		b.WriteString("; filename=")
 		b.WriteString(quoteString(filename))
 		return b.String()
@@ -232,17 +255,16 @@ func decodeExtValue(s string) (string, error) {
 	}
 
 	switch charset {
-	case "utf-8", "iso-8859-1":
-		// UTF-8 bytes are used directly; ISO-8859-1 bytes map 1:1 to runes,
-		// but for our purposes we treat the raw bytes as UTF-8 which is the
-		// common case for filenames.
-		if charset == "iso-8859-1" {
-			var b strings.Builder
-			for _, by := range raw {
-				b.WriteRune(rune(by))
-			}
-			return b.String(), nil
+	case "iso-8859-1":
+		// ISO-8859-1 bytes map 1:1 to the first 256 Unicode code points.
+		var b strings.Builder
+		for _, by := range raw {
+			b.WriteRune(rune(by))
 		}
+		return b.String(), nil
+	case "utf-8", "utf8":
+		// UTF-8 bytes are used directly. Upstream accepts both the "utf-8"
+		// and the legacy "utf8" charset labels.
 		return string(raw), nil
 	default:
 		return "", fmt.Errorf("unsupported charset %q", charset)

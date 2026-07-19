@@ -104,13 +104,15 @@ func TestRangeV4(t *testing.T) {
 
 func TestRangeV6(t *testing.T) {
 	cases := map[string]string{
-		"::":          "unspecified",
-		"::1":         "loopback",
-		"ff02::1":     "multicast",
-		"fe80::1":     "linkLocal",
-		"fc00::1":     "uniqueLocal",
-		"fd00::1":     "uniqueLocal",
-		"2001:db8::1": "unicast",
+		"::":      "unspecified",
+		"::1":     "loopback",
+		"ff02::1": "multicast",
+		"fe80::1": "linkLocal",
+		"fc00::1": "uniqueLocal",
+		"fd00::1": "uniqueLocal",
+		// 2001:db8::/32 is the RFC 3849 documentation block, which ipaddr.js
+		// classifies as "reserved".
+		"2001:db8::1": "reserved",
 	}
 	for s, want := range cases {
 		a, err := Parse(s)

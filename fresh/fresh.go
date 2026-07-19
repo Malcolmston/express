@@ -72,19 +72,18 @@ func Fresh(reqHeaders, resHeaders http.Header) bool {
 		return false
 	}
 
-	// If-None-Match
+	// If-None-Match takes precedence over If-Modified-Since. When present, it
+	// alone determines freshness; If-Modified-Since is not consulted. Only a
+	// lone "*" (the entire header value) is a wildcard that matches any ETag.
 	if noneMatch != "" {
-		if strings.TrimSpace(noneMatch) == "*" {
-			// still need If-Modified-Since to also pass if present
-		} else {
-			etag := resHeaders.Get("ETag")
-			if etag == "" {
-				return false
-			}
-			if !etagMatches(noneMatch, etag) {
-				return false
-			}
+		if noneMatch == "*" {
+			return true
 		}
+		etag := resHeaders.Get("ETag")
+		if etag == "" {
+			return false
+		}
+		return etagMatches(noneMatch, etag)
 	}
 
 	// If-Modified-Since
@@ -117,27 +116,22 @@ func cacheControlNoCache(value string) bool {
 	return false
 }
 
-// etagMatches reports whether the ETag matches any tag in the If-None-Match
-// list, using weak comparison (the "W/" prefix is ignored).
+// etagMatches reports whether the response ETag matches any tag in the
+// If-None-Match token list. The comparison mirrors upstream jshttp/fresh: a
+// tag matches when it equals the ETag exactly, or when either side is the weak
+// ("W/") form of the other. A bare "*" inside a list is not a wildcard here;
+// only a lone "*" header value (handled by the caller) matches any ETag.
 func etagMatches(noneMatch, etag string) bool {
-	target := stripWeak(strings.TrimSpace(etag))
 	for _, tag := range strings.Split(noneMatch, ",") {
-		tag = stripWeak(strings.TrimSpace(tag))
+		tag = strings.TrimSpace(tag)
 		if tag == "" {
 			continue
 		}
-		if tag == "*" || tag == target {
+		if tag == etag || tag == "W/"+etag || "W/"+tag == etag {
 			return true
 		}
 	}
 	return false
-}
-
-func stripWeak(tag string) string {
-	if strings.HasPrefix(tag, "W/") {
-		return tag[2:]
-	}
-	return tag
 }
 
 // parseHTTPDate parses an HTTP date in any of the standard formats.

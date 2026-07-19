@@ -65,7 +65,9 @@ func TestHumanizeRound(t *testing.T) {
 }
 
 func TestHumanizeNegative(t *testing.T) {
-	if got := Humanize(-61000); got != "-1 minute, 1 second" {
-		t.Errorf("Humanize(-61000) = %q, want %q", got, "-1 minute, 1 second")
+	// Upstream humanize-duration applies Math.abs, so negatives render as their
+	// magnitude with no sign prefix.
+	if got := Humanize(-61000); got != "1 minute, 1 second" {
+		t.Errorf("Humanize(-61000) = %q, want %q", got, "1 minute, 1 second")
 	}
 }

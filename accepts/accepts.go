@@ -67,16 +67,28 @@ type Accepts struct {
 	language string
 	charset  string
 	encoding string
+
+	// presence flags distinguish an absent header (the field was never sent)
+	// from one present with an empty value. Upstream treats an absent Accept*
+	// header as "anything is acceptable" (returning the wildcard defaults from
+	// the no-argument accessors) while a present-but-empty header yields an
+	// empty result set.
+	hasAccept   bool
+	hasLanguage bool
+	hasCharset  bool
 }
 
 // New creates an Accepts from the given request headers, reading the Accept,
 // Accept-Language, Accept-Charset and Accept-Encoding fields.
 func New(header http.Header) *Accepts {
 	return &Accepts{
-		accept:   header.Get("Accept"),
-		language: header.Get("Accept-Language"),
-		charset:  header.Get("Accept-Charset"),
-		encoding: header.Get("Accept-Encoding"),
+		accept:      header.Get("Accept"),
+		language:    header.Get("Accept-Language"),
+		charset:     header.Get("Accept-Charset"),
+		encoding:    header.Get("Accept-Encoding"),
+		hasAccept:   len(header.Values("Accept")) > 0,
+		hasLanguage: len(header.Values("Accept-Language")) > 0,
+		hasCharset:  len(header.Values("Accept-Charset")) > 0,
 	}
 }
 
@@ -111,13 +123,14 @@ var mimeShorthand = map[string]string{
 // MIME type.
 func normalizeOffer(offer string) string {
 	o := strings.ToLower(strings.TrimSpace(offer))
+	// A leading dot denotes a file-extension form (".html", ".txt"); strip it
+	// so it resolves the same way as the bare extension, mirroring upstream's
+	// use of mime.lookup which accepts both "html" and ".html".
+	o = strings.TrimPrefix(o, ".")
 	if full, ok := mimeShorthand[o]; ok {
 		return full
 	}
 	if !strings.ContainsRune(o, '/') {
-		if full, ok := mimeShorthand[o]; ok {
-			return full
-		}
 		return "application/" + o
 	}
 	return o
@@ -294,6 +307,12 @@ func (a *Accepts) Types(offers ...string) []string {
 	specs := parseHeader(a.accept, splitMedia)
 
 	if len(offers) == 0 {
+		// An absent Accept header means anything is acceptable, reported as
+		// the "*/*" wildcard (upstream behavior); a present-but-empty header
+		// yields no acceptable types.
+		if !a.hasAccept {
+			return []string{"*/*"}
+		}
 		// Return the header's media types in preference order (excluding
 		// q=0 and wildcards resolved as-is).
 		var items []scored
@@ -350,6 +369,9 @@ func (a *Accepts) Languages(offers ...string) []string {
 	specs := parseHeader(a.language, splitLang)
 
 	if len(offers) == 0 {
+		if !a.hasLanguage {
+			return []string{"*"}
+		}
 		var items []scored
 		for _, s := range specs {
 			if s.q <= 0 {
@@ -401,6 +423,9 @@ func (a *Accepts) Charsets(offers ...string) []string {
 	specs := parseHeader(a.charset, splitPlain)
 
 	if len(offers) == 0 {
+		if !a.hasCharset {
+			return []string{"*"}
+		}
 		var items []scored
 		for _, s := range specs {
 			if s.q <= 0 {
@@ -488,27 +513,29 @@ func (a *Accepts) Encodings(offers ...string) []string {
 			items = append(items, scored{offer: s.value, q: s.q, order: s.order})
 			seen[strings.ToLower(s.value)] = true
 		}
-		if identityQ > 0 && !seen["identity"] {
-			items = append(items, scored{offer: "identity", q: identityQ, order: len(specs)})
-		}
 		sortScored(items)
-		out := make([]string, 0, len(items))
+		out := make([]string, 0, len(items)+1)
 		for _, it := range items {
 			out = append(out, it.offer)
+		}
+		// The implicit identity encoding is always the least preferred, so it
+		// is appended after the explicitly listed encodings rather than being
+		// ranked by its quality value (upstream behavior).
+		if identityQ > 0 && !seen["identity"] {
+			out = append(out, "identity")
 		}
 		return out
 	}
 
-	// No Accept-Encoding header: only identity is implied acceptable.
+	// No Accept-Encoding header: only identity is implied acceptable, so any
+	// non-identity offer is unacceptable.
 	if strings.TrimSpace(a.encoding) == "" {
 		for _, offer := range offers {
 			if strings.EqualFold(offer, "identity") {
 				return []string{offer}
 			}
 		}
-		// Per spec, absence means anything is acceptable; return offers as-is
-		// with identity preferred already handled above.
-		return append([]string(nil), offers...)
+		return nil
 	}
 
 	var items []scored

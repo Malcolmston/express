@@ -56,8 +56,9 @@ type Error struct {
 	Status int
 	// Message is the human-readable error text returned by Error.
 	Message string
-	// Expose reports whether Message is safe to send to clients. It defaults
-	// to true for 4xx status codes and false for 5xx status codes.
+	// Expose reports whether Message is safe to send to clients. Following
+	// http-errors, it defaults to true for status codes below 500 and false
+	// for 500 and above.
 	Expose bool
 }
 
@@ -68,16 +69,30 @@ func (e *Error) Error() string {
 
 // New creates a new *Error with the given status code and message.
 //
-// If msg is empty the standard status text for the code is used. Expose
-// defaults to true for 4xx status codes and false for 5xx status codes.
+// If msg is empty the standard status text for the code is used, falling back
+// to the status-code class default for unknown 4xx/5xx codes. Expose defaults
+// to true for status codes below 500 and false for 500 and above.
 func New(status int, msg string) *Error {
 	if msg == "" {
 		msg = http.StatusText(status)
 	}
+	if msg == "" {
+		// Unknown status code with no standard reason phrase. http-errors
+		// builds such errors from the status-code class constructor, so an
+		// unknown 4xx uses the 400 default message and an unknown 5xx uses the
+		// 500 default (e.g. 499 -> "Bad Request", 599 -> "Internal Server
+		// Error").
+		switch {
+		case status >= 400 && status < 500:
+			msg = http.StatusText(http.StatusBadRequest)
+		case status >= 500 && status < 600:
+			msg = http.StatusText(http.StatusInternalServerError)
+		}
+	}
 	return &Error{
 		Status:  status,
 		Message: msg,
-		Expose:  status >= 400 && status < 500,
+		Expose:  status < 500,
 	}
 }
 

@@ -49,6 +49,7 @@ package proxyaddr
 import (
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -101,12 +102,45 @@ func ProxyAddr(remoteAddr, xff string, trust func(addr string, i int) bool) stri
 	return result
 }
 
+// subnet is a trusted address range expressed in a unified 128-bit space. Every
+// range is normalized to a 16-byte IP (IPv4 ranges use the ::ffff:0:0/96
+// IPv4-mapped prefix) plus a prefix length measured in that 128-bit space, so a
+// single prefix comparison handles IPv4, IPv6, and IPv4-mapped-IPv6 addresses
+// the same way the upstream ipaddr.js matcher does.
+type subnet struct {
+	ip   net.IP
+	ones int
+}
+
+// match reports whether the given 16-byte address falls within the subnet.
+func (s subnet) match(ip16 net.IP) bool {
+	full := s.ones / 8
+	rem := s.ones % 8
+	for i := 0; i < full; i++ {
+		if ip16[i] != s.ip[i] {
+			return false
+		}
+	}
+	if rem > 0 {
+		mask := byte(0xff) << uint(8-rem)
+		if (ip16[full]^s.ip[full])&mask != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // Compile builds a trust function from a list of trusted CIDR strings and/or
 // the named presets "loopback", "linklocal", and "uniquelocal". The returned
 // function reports whether a given address falls within any of the trusted
 // ranges. It returns an error if any value is not a valid preset or CIDR.
+//
+// Accepted range notations mirror proxy-addr: a bare IP address (a single
+// host), an IP with a numeric CIDR prefix, and an IPv4 address with an IPv4
+// subnet mask ("10.0.0.0/255.0.0.0"). IPv4-mapped IPv6 ranges such as
+// "::ffff:a00:0/120" match plain IPv4 addresses, and vice versa.
 func Compile(vals []string) (func(addr string, i int) bool, error) {
-	var nets []*net.IPNet
+	var subnets []subnet
 
 	for _, v := range vals {
 		v = strings.TrimSpace(v)
@@ -116,20 +150,20 @@ func Compile(vals []string) (func(addr string, i int) bool, error) {
 
 		if ranges, ok := presets[strings.ToLower(v)]; ok {
 			for _, r := range ranges {
-				n, err := parseRange(r)
+				s, err := parseNotation(r)
 				if err != nil {
 					return nil, err
 				}
-				nets = append(nets, n)
+				subnets = append(subnets, s)
 			}
 			continue
 		}
 
-		n, err := parseRange(v)
+		s, err := parseNotation(v)
 		if err != nil {
 			return nil, err
 		}
-		nets = append(nets, n)
+		subnets = append(subnets, s)
 	}
 
 	return func(addr string, _ int) bool {
@@ -137,8 +171,12 @@ func Compile(vals []string) (func(addr string, i int) bool, error) {
 		if ip == nil {
 			return false
 		}
-		for _, n := range nets {
-			if n.Contains(ip) {
+		ip16 := ip.To16()
+		if ip16 == nil {
+			return false
+		}
+		for _, s := range subnets {
+			if s.match(ip16) {
 				return true
 			}
 		}
@@ -146,26 +184,77 @@ func Compile(vals []string) (func(addr string, i int) bool, error) {
 	}, nil
 }
 
-// parseRange parses a CIDR string, or a bare IP address which is treated as a
-// single-host range.
-func parseRange(s string) (*net.IPNet, error) {
-	if strings.Contains(s, "/") {
-		_, n, err := net.ParseCIDR(s)
-		if err != nil {
-			return nil, err
-		}
-		return n, nil
+// parseNotation parses one trust range: a bare IP (single host), an IP with a
+// numeric CIDR prefix, or an IPv4 address with an IPv4 subnet mask. The result
+// is normalized into the unified 128-bit space used by subnet.match.
+func parseNotation(note string) (subnet, error) {
+	pos := strings.LastIndexByte(note, '/')
+	str := note
+	if pos != -1 {
+		str = note[:pos]
 	}
 
-	ip := net.ParseIP(s)
+	ip := net.ParseIP(str)
 	if ip == nil {
-		return nil, errors.New("proxyaddr: invalid IP address: " + s)
+		return subnet{}, errors.New("proxyaddr: invalid IP address: " + str)
 	}
-	bits := 32
-	if ip.To4() == nil {
-		bits = 128
+
+	// The IPv6 vs IPv4 "kind" follows the textual form, matching ipaddr.js:
+	// "::ffff:a00:2" is treated as IPv6 (max prefix 128) even though it maps to
+	// an IPv4 address, while "10.0.0.2" is IPv4 (max prefix 32).
+	ipv6Family := strings.Contains(str, ":")
+	max := 32
+	if ipv6Family {
+		max = 128
 	}
-	return &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}, nil
+
+	n := max
+	if pos != -1 {
+		rng := note[pos+1:]
+		switch {
+		case isDigits(rng):
+			n, _ = strconv.Atoi(rng)
+		case !ipv6Family && net.ParseIP(rng) != nil:
+			// IPv4 subnet-mask notation, e.g. "255.255.255.0".
+			m4 := net.ParseIP(rng).To4()
+			if m4 == nil {
+				return subnet{}, errors.New("proxyaddr: invalid range on address: " + note)
+			}
+			ones, bits := net.IPMask(m4).Size()
+			if bits == 0 {
+				// Non-contiguous mask.
+				return subnet{}, errors.New("proxyaddr: invalid range on address: " + note)
+			}
+			n = ones
+		default:
+			return subnet{}, errors.New("proxyaddr: invalid range on address: " + note)
+		}
+	}
+
+	if n <= 0 || n > max {
+		return subnet{}, errors.New("proxyaddr: invalid range on address: " + note)
+	}
+
+	ones := n
+	if !ipv6Family {
+		// Shift an IPv4 prefix into the ::ffff:0:0/96 mapped space.
+		ones = 96 + n
+	}
+	return subnet{ip: ip.To16(), ones: ones}, nil
+}
+
+// isDigits reports whether s is a non-empty run of ASCII digits, matching the
+// upstream /^[0-9]+$/ test used to distinguish a numeric CIDR prefix.
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // stripPort removes a trailing port from an address if present, handling IPv6

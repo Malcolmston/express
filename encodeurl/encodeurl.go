@@ -101,21 +101,24 @@ func isHex(r rune) bool {
 
 // safeChar reports whether r is in the reference implementation's set of
 // characters that are never encoded (excluding '%', handled separately).
+//
+// The set mirrors the character class kept out of encodeurl's
+// ENCODE_CHARS_REGEXP, /[^\x21\x23-\x3B\x3D\x3F-\x5F\x61-\x7A\x7C\x7E]/, so
+// that '\' (0x5C), '^' (0x5E), and '|' (0x7C) are preserved just as upstream
+// preserves them.
 func safeChar(r rune) bool {
 	switch {
 	case r == 0x21: // !
 		return true
-	case r >= 0x26 && r <= 0x3B: // & ' ( ) * + , - . / 0-9 : ;
+	case r >= 0x23 && r <= 0x3B: // # $ % & ' ( ) * + , - . / 0-9 : ;
 		return true
 	case r == 0x3D: // =
 		return true
-	case r >= 0x3F && r <= 0x5B: // ? @ A-Z [
-		return true
-	case r == 0x5D: // ]
-		return true
-	case r == 0x5F: // _
+	case r >= 0x3F && r <= 0x5F: // ? @ A-Z [ \ ] ^ _
 		return true
 	case r >= 0x61 && r <= 0x7A: // a-z
+		return true
+	case r == 0x7C: // |
 		return true
 	case r == 0x7E: // ~
 		return true
@@ -123,13 +126,14 @@ func safeChar(r rune) bool {
 	return false
 }
 
-// encodeURIChar mirrors JavaScript's encodeURI for a single rune: reserved and
-// unreserved URL characters are preserved, everything else is percent-encoded
-// using its UTF-8 byte representation.
+// encodeURIChar percent-encodes a single rune using its UTF-8 byte
+// representation with upper-case hex digits.
+//
+// It is only ever called for runes outside safeChar's set. Upstream applies
+// JavaScript's encodeURI to exactly those runes, and every character encodeURI
+// would leave untouched is already in safeChar's set, so encodeURI always
+// percent-encodes here and this function does too.
 func encodeURIChar(r rune) string {
-	if encodeURISafe(r) {
-		return string(r)
-	}
 	const hexDigits = "0123456789ABCDEF"
 	var b strings.Builder
 	for _, by := range []byte(string(r)) {
@@ -138,18 +142,4 @@ func encodeURIChar(r rune) string {
 		b.WriteByte(hexDigits[by&0x0F])
 	}
 	return b.String()
-}
-
-// encodeURISafe reports whether r is a character that JavaScript's encodeURI
-// does not encode.
-func encodeURISafe(r rune) bool {
-	if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-		return true
-	}
-	switch r {
-	case '-', '_', '.', '!', '~', '*', '\'', '(', ')',
-		';', ',', '/', '?', ':', '@', '&', '=', '+', '$', '#':
-		return true
-	}
-	return false
 }

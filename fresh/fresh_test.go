@@ -86,8 +86,10 @@ func TestNoCache(t *testing.T) {
 	}
 }
 
-func TestBothConditionsMustPass(t *testing.T) {
-	// etag matches but modified-since is stale -> not fresh
+func TestNoneMatchTakesPrecedence(t *testing.T) {
+	// Upstream: If-None-Match takes precedence over If-Modified-Since. When the
+	// ETag matches, the response is fresh even if the modification date would
+	// otherwise be stale; If-Modified-Since is not consulted at all.
 	reqH := req(map[string]string{
 		"If-None-Match":     `"foo"`,
 		"If-Modified-Since": "Fri, 31 Dec 1999 00:00:00 GMT",
@@ -96,7 +98,7 @@ func TestBothConditionsMustPass(t *testing.T) {
 		"ETag":          `"foo"`,
 		"Last-Modified": "Sat, 01 Jan 2000 00:00:00 GMT",
 	})
-	if Fresh(reqH, resH) {
-		t.Fatal("both conditions must pass")
+	if !Fresh(reqH, resH) {
+		t.Fatal("matching if-none-match should be fresh regardless of if-modified-since")
 	}
 }

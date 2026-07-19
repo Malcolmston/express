@@ -19,12 +19,12 @@ func ExampleFormat() {
 // ExampleFormat_unicode shows how a non-ASCII filename is encoded. Because a
 // bare filename parameter may only carry ASCII, an RFC 5987 filename* parameter
 // is added with the name UTF-8 percent-encoded. By default a legacy ASCII
-// fallback is emitted alongside it, built by replacing each non-ASCII byte with
-// '?'. Browsers that understand filename* use the decoded Unicode name and
+// fallback is emitted alongside it, built by replacing each non-ASCII character
+// with '?'. Browsers that understand filename* use the decoded Unicode name and
 // ignore the fallback.
 func ExampleFormat_unicode() {
 	fmt.Println(contentdisposition.Format("naïve.txt"))
-	// Output: attachment; filename="na??ve.txt"; filename*=UTF-8''na%c3%afve.txt
+	// Output: attachment; filename="na?ve.txt"; filename*=UTF-8''na%C3%AFve.txt
 }
 
 // ExampleParse decodes a Content-Disposition header value back into its type and

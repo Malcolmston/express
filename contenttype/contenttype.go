@@ -62,6 +62,11 @@ const token = "[!#$%&'*+.^_`|~0-9A-Za-z-]"
 var (
 	typeRE  = regexp.MustCompile(`^` + token + `+/` + token + `+$`)
 	tokenRE = regexp.MustCompile(`^` + token + `+$`)
+	// textRE matches values that may be written as a quoted-string: HTAB, SP,
+	// printable ASCII, and obs-text (%x80-FF), per RFC 9110 sec 5.6.4. Values
+	// outside this class (e.g. NUL or vertical tab) cannot be represented and
+	// are rejected by Format, matching upstream qstring().
+	textRE = regexp.MustCompile(`^[\x{09}\x{20}-\x{7e}\x{80}-\x{ff}]*$`)
 	// paramRE matches a single "; name=value" parameter at the start of the
 	// remaining input. The value is either a token or a quoted string.
 	paramRE    = regexp.MustCompile(`^;[ \t]*(` + token + `+)[ \t]*=[ \t]*("(?:\\.|[^"\\])*"|` + token + `+)[ \t]*`)
@@ -133,10 +138,12 @@ func Format(ct ContentType) (string, error) {
 		v := ct.Parameters[k]
 		if tokenRE.MatchString(v) {
 			b.WriteString(v)
-		} else {
+		} else if textRE.MatchString(v) {
 			b.WriteByte('"')
 			b.WriteString(escapeRE.ReplaceAllString(v, `\$1`))
 			b.WriteByte('"')
+		} else {
+			return "", fmt.Errorf("contenttype: invalid parameter value %q", v)
 		}
 	}
 	return b.String(), nil
