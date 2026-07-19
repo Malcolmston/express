@@ -92,8 +92,9 @@ func TestPrettyBytesFractionDigits(t *testing.T) {
 }
 
 func TestGrouping(t *testing.T) {
-	// 999_999 bytes rounds up to 1,000 kB via 3 significant digits.
-	if got := PrettyBytes(999999); got != "1,000 kB" {
-		t.Errorf("PrettyBytes(999999) = %q, want %q", got, "1,000 kB")
+	// 999_999 bytes rounds up to 1000 kB via 3 significant digits. Upstream's
+	// default (no locale) path does not group with commas.
+	if got := PrettyBytes(999999); got != "1000 kB" {
+		t.Errorf("PrettyBytes(999999) = %q, want %q", got, "1000 kB")
 	}
 }

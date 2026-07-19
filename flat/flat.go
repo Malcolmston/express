@@ -12,8 +12,12 @@
 // prefix with the delimiter (default "."); any other value, including a slice
 // or a struct, is stored unchanged as a leaf. Unflatten performs the inverse:
 // it splits each composite key on the delimiter and rebuilds the nested maps
-// segment by segment. The delimiter is configurable through FlattenOpts and
-// UnflattenOpts, but both sides must agree on it for a round trip to succeed.
+// segment by segment. Before rebuilding, Unflatten re-flattens any entry whose
+// value is itself a non-empty nested map, merging it in under its own key; this
+// matches the original library's handling of "messy" inputs and keeps siblings
+// like {"a.b": {...}, "a": {...}} from clobbering one another. The delimiter is
+// configurable through FlattenOpts and UnflattenOpts, but both sides must agree
+// on it for a round trip to succeed.
 //
 // One deliberate edge case is that an empty nested map is preserved as a leaf
 // rather than vanishing, so {"a": {}} flattens to {"a": {}} with the empty map
@@ -86,8 +90,23 @@ func Unflatten(m map[string]any, opts ...UnflattenOpts) map[string]any {
 	if len(opts) > 0 && opts[0].Delimiter != "" {
 		delim = opts[0].Delimiter
 	}
-	out := make(map[string]any)
+	// Mirror upstream's pre-processing pass: any entry whose value is itself a
+	// non-empty nested map is re-flattened and merged in under its own key
+	// before the tree is rebuilt. This makes "messy" inputs (delimited keys
+	// pointing at further nested maps) round-trip correctly and stops siblings
+	// such as {"a.b": {...}, "a": {...}} from clobbering one another regardless
+	// of map iteration order. Empty maps are left untouched as leaves.
+	target := make(map[string]any, len(m))
 	for k, v := range m {
+		if child, ok := v.(map[string]any); ok && len(child) > 0 {
+			flatten(k, child, delim, target)
+			continue
+		}
+		target[k] = v
+	}
+
+	out := make(map[string]any)
+	for k, v := range target {
 		parts := strings.Split(k, delim)
 		cur := out
 		for i, p := range parts {

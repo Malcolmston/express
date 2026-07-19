@@ -71,6 +71,11 @@ var counter uint64
 
 var fingerprint string
 
+// slugFingerprint is a stable two-character base-36 condensation of the
+// process fingerprint, used to give slugs a per-process flavour the same way
+// the upstream cuid.slug() mixes in fingerprint().slice(0,1)+slice(-1).
+var slugFingerprint string
+
 func init() {
 	// Seed the counter with a random starting value.
 	var seed [8]byte
@@ -82,6 +87,12 @@ func init() {
 		atomic.StoreUint64(&counter, n)
 	}
 	fingerprint = buildFingerprint()
+	sum := sha512.Sum512([]byte(fingerprint))
+	sf := base36Encode(sum[:])
+	for len(sf) < 2 {
+		sf += "0"
+	}
+	slugFingerprint = sf[:2]
 }
 
 func buildFingerprint() string {
@@ -160,6 +171,36 @@ func NewLength(n int) (string, error) {
 		body += randomString(bigLength)
 	}
 	return body[:n], nil
+}
+
+// Slug returns a short, slug-style identifier, a port of the upstream
+// cuid.slug() helper. Like the original it concatenates the tail of a base-36
+// timestamp, a base-36 counter (at most four characters), a two-character
+// per-process fingerprint, and two random characters. The result is always
+// URL-safe and between 7 and 10 characters long, so IsSlug reports it valid.
+func Slug() (string, error) {
+	date := strconv.FormatInt(time.Now().UnixMilli(), 36)
+	if len(date) > 2 {
+		date = date[len(date)-2:]
+	}
+
+	c := strconv.FormatUint(atomic.AddUint64(&counter, 1), 36)
+	if len(c) > 4 {
+		c = c[len(c)-4:]
+	}
+
+	r := randomString(4)
+	random := r[len(r)-2:]
+
+	return date + c + slugFingerprint + random, nil
+}
+
+// IsSlug reports whether s has the length of a cuid slug. Mirroring the
+// upstream cuid.isSlug(), it is a length check only: any string of length 7
+// through 10 (inclusive) is accepted; everything else is rejected.
+func IsSlug(s string) bool {
+	n := len(s)
+	return n >= 7 && n <= 10
 }
 
 // IsCuid reports whether s is a syntactically valid cuid2.

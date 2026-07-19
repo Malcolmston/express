@@ -42,16 +42,21 @@ func TestEscapeBytes(t *testing.T) {
 
 func TestEscapeTime(t *testing.T) {
 	tm := time.Date(2026, 7, 4, 13, 5, 9, 0, time.UTC)
-	if got := Escape(tm); got != "'2026-07-04 13:05:09'" {
+	if got := Escape(tm); got != "'2026-07-04 13:05:09.000'" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestEscapeSlice(t *testing.T) {
-	if got := Escape([]any{1, "two", nil}); got != "(1, 'two', NULL)" {
+	// Top-level lists are not parenthesized (upstream arrayToList).
+	if got := Escape([]any{1, "two", nil}); got != "1, 'two', NULL" {
 		t.Errorf("got %q", got)
 	}
-	if got := Escape([]int{1, 2, 3}); got != "(1, 2, 3)" {
+	if got := Escape([]int{1, 2, 3}); got != "1, 2, 3" {
+		t.Errorf("got %q", got)
+	}
+	// Nested lists are grouped in parentheses.
+	if got := Escape([]any{[]int{1, 2}, []int{3, 4}}); got != "(1, 2), (3, 4)" {
 		t.Errorf("got %q", got)
 	}
 }
