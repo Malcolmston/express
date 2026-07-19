@@ -73,9 +73,11 @@ func TestUnclosedTagDropped(t *testing.T) {
 
 func TestStrayLessThan(t *testing.T) {
 	got := StripTags("a < b and c > d")
-	// "< b and c >" looks like a tag and is stripped; "a " and " d" remain.
-	if got != "a  d" {
-		t.Fatalf("StripTags = %q; want %q", got, "a  d")
+	// Upstream (ericnorris/striptags v3.2.0) treats "< " (a '<' followed by a
+	// space) as literal text rather than the start of a tag, so the whole
+	// string passes through unchanged.
+	if got != "a < b and c > d" {
+		t.Fatalf("StripTags = %q; want %q", got, "a < b and c > d")
 	}
 }
 

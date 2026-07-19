@@ -93,6 +93,25 @@ func title(w string) string {
 	return string(r)
 }
 
+// pascalTransform title-cases a single word for CamelCase and PascalCase,
+// mirroring change-case's pascalCaseTransformFactory: the first character is
+// upper-cased and the remainder lower-cased, except that a non-leading word
+// beginning with an ASCII digit is prefixed with "_" to preserve the word
+// boundary (so "version 1.2.10" becomes "version_1_2_10", not "version1210").
+func pascalTransform(word string, index int) string {
+	if word == "" {
+		return ""
+	}
+	r := []rune(word)
+	var initial string
+	if index > 0 && r[0] >= '0' && r[0] <= '9' {
+		initial = "_" + string(r[0])
+	} else {
+		initial = string(unicode.ToUpper(r[0]))
+	}
+	return initial + strings.ToLower(string(r[1:]))
+}
+
 // NoCase joins the lowercased words of s with single spaces, e.g.
 // NoCase("fooBarBaz") is "foo bar baz".
 func NoCase(s string) string {
@@ -108,8 +127,8 @@ func CamelCase(s string) string {
 	}
 	var b strings.Builder
 	b.WriteString(w[0])
-	for _, x := range w[1:] {
-		b.WriteString(title(x))
+	for i := 1; i < len(w); i++ {
+		b.WriteString(pascalTransform(w[i], i))
 	}
 	return b.String()
 }
@@ -119,8 +138,8 @@ func CamelCase(s string) string {
 func PascalCase(s string) string {
 	w := lowerWords(s)
 	var b strings.Builder
-	for _, x := range w {
-		b.WriteString(title(x))
+	for i, x := range w {
+		b.WriteString(pascalTransform(x, i))
 	}
 	return b.String()
 }

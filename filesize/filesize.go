@@ -125,7 +125,31 @@ func FileSizeOpts(bytes float64, opts Options) string {
 	}
 
 	val := bytes / math.Pow(divisor, float64(exponent))
-	s := stripTrailingZeros(strconv.FormatFloat(val, 'f', round, 64))
+
+	// Mirror upstream's applyRounding: decimal places are only applied above the
+	// byte unit, so the B unit (exponent 0) always renders as an integer. This
+	// matches the Node original, e.g. filesize(0.5) == "1 B".
+	decimals := 0
+	p := 1.0
+	if exponent > 0 && round > 0 {
+		decimals = round
+		p = math.Pow(10, float64(round))
+	}
+	var r float64
+	if p == 1 {
+		r = math.Round(val)
+	} else {
+		r = math.Round(val*p) / p
+	}
+	// Auto-increment when rounding overflows the unit's ceiling, so a value like
+	// 999999 renders as "1 MB" rather than "1000 kB".
+	if r == divisor && exponent < len(units)-1 {
+		r = 1
+		decimals = 0
+		exponent++
+	}
+
+	s := stripTrailingZeros(strconv.FormatFloat(r, 'f', decimals, 64))
 	return prefix + s + " " + units[exponent]
 }
 

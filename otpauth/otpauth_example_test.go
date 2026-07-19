@@ -23,7 +23,7 @@ func ExampleURL() {
 		Period:  30,
 	}
 	fmt.Println(otpauth.URL(c))
-	// Output: otpauth://totp/ACME%20Co:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=ACME%20Co&digits=6&period=30
+	// Output: otpauth://totp/ACME%20Co:alice@example.com?issuer=ACME%20Co&secret=JBSWY3DPEHPK3PXP&digits=6&period=30
 }
 
 // ExampleURL_hotp builds a counter-based HOTP otpauth:// URI. Selecting the
@@ -42,7 +42,7 @@ func ExampleURL_hotp() {
 		Counter: 5,
 	}
 	fmt.Println(otpauth.URL(c))
-	// Output: otpauth://hotp/ACME:bob?secret=JBSWY3DPEHPK3PXP&issuer=ACME&digits=6&counter=5
+	// Output: otpauth://hotp/ACME:bob?issuer=ACME&secret=JBSWY3DPEHPK3PXP&digits=6&counter=5
 }
 
 // ExampleParse reads an otpauth:// URI back into a Config, the inverse of URL.

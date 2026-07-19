@@ -22,12 +22,15 @@
 // spec-compliant parser.
 //
 // Several edge cases follow the reference library's behavior. HTML comments are
-// always removed regardless of the allowed list. A stray '<' encountered while
-// already inside a tag causes the previously buffered text to be flushed to the
-// output as literal content and a new tag to begin, so malformed input degrades
-// gracefully instead of swallowing text. An unterminated tag run at the end of
-// the input (a trailing '<' with no closing '>') is discarded, matching
-// striptags which drops trailing partial tags.
+// always removed regardless of the allowed list. A '<' immediately followed by
+// a space or newline is not the start of a tag: the "< " is emitted literally
+// and parsing returns to plaintext, so text like "a < b" survives untouched.
+// While inside a tag, quotes are tracked so that a '<' or '>' appearing inside a
+// quoted attribute value is not mistaken for a tag delimiter, and additional
+// unquoted '<' characters merely increase a nesting depth (matched by later
+// '>') rather than being copied out. An unterminated tag run at the end of the
+// input (a trailing '<' with no closing '>') is discarded, matching striptags
+// which drops trailing partial tags.
 //
 // This port intentionally keeps the surface small. Unlike some configurations
 // of the Node package it does not replace stripped tags with a substitute
@@ -60,21 +63,15 @@ func StripTags(html string, allowed ...string) string {
 	var tag strings.Builder
 
 	state := statePlaintext
+	depth := 0
+	var inQuote byte // 0 when not inside a quoted attribute value
+
 	for i := 0; i < len(html); i++ {
 		c := html[i]
 		switch state {
 		case statePlaintext:
 			if c == '<' {
-				// Detect the start of an HTML comment.
-				if strings.HasPrefix(html[i:], "<!--") {
-					state = stateComment
-					tag.Reset()
-					tag.WriteString("<!--")
-					i += 3
-					continue
-				}
 				state = stateHTML
-				tag.Reset()
 				tag.WriteByte(c)
 			} else {
 				out.WriteByte(c)
@@ -82,27 +79,64 @@ func StripTags(html string, allowed ...string) string {
 		case stateHTML:
 			switch c {
 			case '<':
-				// A stray '<' inside what we thought was a tag: emit the
-				// buffered text as plain content and restart the tag.
-				out.WriteString(tag.String())
-				tag.Reset()
-				tag.WriteByte(c)
+				// Ignore '<' inside a quoted value; otherwise it is a
+				// nested delimiter that raises the depth (matched by a
+				// later '>') rather than closing the tag.
+				if inQuote != 0 {
+					break
+				}
+				depth++
 			case '>':
-				tag.WriteByte(c)
+				if inQuote != 0 {
+					break
+				}
+				if depth > 0 {
+					depth--
+					break
+				}
+				tag.WriteByte('>')
 				full := tag.String()
 				if allowedSet[tagName(full)] {
 					out.WriteString(full)
 				}
 				tag.Reset()
+				inQuote = 0
 				state = statePlaintext
+			case '"', '\'':
+				if c == inQuote {
+					inQuote = 0
+				} else if inQuote == 0 {
+					inQuote = c
+				}
+				tag.WriteByte(c)
+			case '-':
+				// "<!-" followed by '-' begins an HTML comment.
+				if tag.String() == "<!-" {
+					state = stateComment
+				}
+				tag.WriteByte(c)
+			case ' ', '\n':
+				// A bare "<" followed by whitespace is not a tag: emit the
+				// "< " literally and return to plaintext.
+				if tag.String() == "<" {
+					out.WriteString("< ")
+					tag.Reset()
+					state = statePlaintext
+					break
+				}
+				tag.WriteByte(c)
 			default:
 				tag.WriteByte(c)
 			}
 		case stateComment:
-			tag.WriteByte(c)
-			if c == '>' && strings.HasSuffix(tag.String(), "-->") {
+			if c == '>' {
+				// Close only when the two characters before '>' are "--".
+				if s := tag.String(); len(s) >= 2 && s[len(s)-2:] == "--" {
+					state = statePlaintext
+				}
 				tag.Reset()
-				state = statePlaintext
+			} else {
+				tag.WriteByte(c)
 			}
 		}
 	}

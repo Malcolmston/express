@@ -13,8 +13,9 @@
 // By default the package uses SI units (base 1000): B, kB, MB, GB, TB, PB, EB, ZB,
 // YB, and formats the mantissa with up to three significant digits, mirroring
 // JavaScript's Number.prototype.toPrecision(3) followed by toLocaleString — so
-// trailing zeros are stripped ("1 kB", not "1.00 kB") and the integer part is
-// grouped with commas ("1,000 kB"). The correct unit is chosen by taking the
+// trailing zeros are stripped ("1 kB", not "1.00 kB"). Matching upstream, the
+// default (no fraction-digit options) path does NOT group the integer part with
+// commas, so 1e30 renders as "1000000 YB". The correct unit is chosen by taking the
 // base-1000 (or base-1024) logarithm of the magnitude and then nudging the
 // exponent up or down to correct for floating-point error at the boundaries, so
 // values right at a power of the base land on the expected unit.
@@ -109,7 +110,13 @@ func PrettyBytesOpts(number float64, opts Options) string {
 	minFD, maxFD := fractionDigits(opts)
 
 	if number < 1 {
-		return prefix + formatLocale(number, minFD, maxFD) + separator + units[0]
+		var numStr string
+		if hasLocale {
+			numStr = formatLocale(number, minFD, maxFD)
+		} else {
+			numStr = formatPrecision(number, 3)
+		}
+		return prefix + numStr + separator + units[0]
 	}
 
 	base := 1000.0
@@ -170,8 +177,10 @@ func fractionDigits(opts Options) (minFD, maxFD int) {
 }
 
 // formatPrecision mirrors JavaScript's Number.prototype.toPrecision followed by
-// Number()+toLocaleString: it keeps at most `p` significant digits, strips
-// trailing zeros and groups the integer part with commas.
+// Number()+String(): it keeps at least `p` significant digits (never rounding
+// away integer digits) and strips trailing zeros. Upstream calls toLocaleString
+// with no locale and no options in this path, which returns the number
+// unformatted, so — unlike the locale path — it does NOT group with commas.
 func formatPrecision(n float64, p int) string {
 	if n == 0 {
 		return "0"
@@ -182,22 +191,34 @@ func formatPrecision(n float64, p int) string {
 		decimals = 0
 	}
 	s := strconv.FormatFloat(n, 'f', decimals, 64)
-	return stripAndGroup(s)
+	return strip(s)
 }
 
-// formatLocale rounds to maxFD digits, then removes trailing zeros down to
-// minFD and groups the integer part with commas.
+// formatLocale truncates (toward zero) to maxFD digits, then removes trailing
+// zeros down to minFD and groups the integer part with commas. Upstream builds
+// its Intl.NumberFormat options with `roundingMode: 'trunc'`, so this path must
+// truncate rather than round; e.g. 59.952784 at maxFD=1 is "59.9", not "60".
 func formatLocale(n float64, minFD, maxFD int) string {
 	neg := n < 0
 	if neg {
 		n = -n
 	}
-	s := strconv.FormatFloat(n, 'f', maxFD, 64)
+	// Use the shortest round-trip decimal (what Intl.NumberFormat operates on),
+	// then cut at maxFD without rounding to mirror roundingMode: 'trunc'. Using
+	// the raw double expansion instead would truncate 1.9 (stored as
+	// 1.899999...) down to "1.8".
+	s := strconv.FormatFloat(n, 'f', -1, 64)
 	intPart := s
 	frac := ""
 	if i := strings.IndexByte(s, '.'); i >= 0 {
 		intPart = s[:i]
 		frac = s[i+1:]
+	}
+	if len(frac) > maxFD {
+		frac = frac[:maxFD]
+	}
+	for len(frac) < maxFD {
+		frac += "0"
 	}
 	for len(frac) > minFD && strings.HasSuffix(frac, "0") {
 		frac = frac[:len(frac)-1]
@@ -212,9 +233,9 @@ func formatLocale(n float64, minFD, maxFD int) string {
 	return res
 }
 
-// stripAndGroup strips trailing zeros from the fractional part and groups the
-// integer part with commas.
-func stripAndGroup(s string) string {
+// strip removes trailing zeros from the fractional part without grouping the
+// integer part, matching upstream's no-locale formatting path.
+func strip(s string) string {
 	neg := strings.HasPrefix(s, "-")
 	if neg {
 		s = s[1:]
@@ -226,7 +247,7 @@ func stripAndGroup(s string) string {
 		frac = s[i+1:]
 	}
 	frac = strings.TrimRight(frac, "0")
-	res := group(intPart)
+	res := intPart
 	if frac != "" {
 		res += "." + frac
 	}

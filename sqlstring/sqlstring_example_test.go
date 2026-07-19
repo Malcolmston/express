@@ -31,19 +31,19 @@ func ExampleEscape() {
 
 // ExampleEscape_types shows the richer values Escape understands beyond simple
 // scalars. A []byte is rendered as an X'..' hexadecimal blob literal, a time.Time
-// becomes a quoted 'YYYY-MM-DD HH:MM:SS' timestamp in its own location, and a
-// slice or array is rendered as a parenthesized, comma-joined list of its escaped
-// elements. The slice form is exactly what an IN clause needs, and because every
-// element is escaped recursively, mixing numbers, strings, and NULL in one list
-// stays safe. This example prints one value of each kind.
+// becomes a quoted 'YYYY-MM-DD HH:MM:SS.sss' timestamp in its own location, and a
+// slice or array is rendered as a comma-joined list of its escaped elements. The
+// slice form is exactly what an IN clause needs, and because every element is
+// escaped recursively, mixing numbers, strings, and NULL in one list stays safe.
+// This example prints one value of each kind.
 func ExampleEscape_types() {
 	fmt.Println(sqlstring.Escape([]byte{0xde, 0xad, 0xbe, 0xef}))
 	fmt.Println(sqlstring.Escape(time.Date(2026, 7, 4, 13, 5, 9, 0, time.UTC)))
 	fmt.Println(sqlstring.Escape([]any{1, "two", nil}))
 	// Output:
 	// X'deadbeef'
-	// '2026-07-04 13:05:09'
-	// (1, 'two', NULL)
+	// '2026-07-04 13:05:09.000'
+	// 1, 'two', NULL
 }
 
 // ExampleEscapeID makes a table or column name safe to embed in a query. The

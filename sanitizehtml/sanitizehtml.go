@@ -25,9 +25,11 @@
 // Disallowed tags are stripped in a way that preserves the reader's content:
 // the tag's angle-bracket markup is removed but the text between the opening
 // and closing tags is emitted verbatim, so "<foo>hello</foo>" becomes "hello".
-// The two exceptions are <script> and <style>, whose entire raw contents are
-// consumed and discarded rather than surfaced as text, preventing script
-// source or CSS from leaking into the output. On surviving start tags each
+// The exceptions are the non-text elements <script>, <style>, <textarea>, and
+// <option>, whose entire raw contents are consumed together with the tag when
+// the tag is disallowed rather than surfaced as text, preventing script source,
+// CSS, or form-control text from leaking into the output. When such a tag is
+// itself allowed its raw content is preserved. On surviving start tags each
 // attribute is checked against AllowedAttributes (honoring the "*" key that
 // applies to every tag), disallowed attributes are dropped, and the retained
 // attribute values are re-escaped with html.EscapeString before serialization.
@@ -64,15 +66,24 @@ type Options struct {
 // and image source attributes are permitted on <img>.
 func DefaultOptions() Options {
 	return Options{
+		// Mirrors sanitizeHtml.defaults.allowedTags in the upstream index.js
+		// (categories derived from MDN element groups).
 		AllowedTags: []string{
-			"h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "p", "a", "ul",
-			"ol", "nl", "li", "b", "i", "strong", "em", "strike", "code", "hr",
-			"br", "div", "table", "thead", "caption", "tbody", "tr", "th", "td",
-			"pre", "span", "sub", "sup", "small", "u", "s", "abbr",
+			"address", "article", "aside", "footer", "header",
+			"h1", "h2", "h3", "h4", "h5", "h6", "hgroup",
+			"main", "nav", "section",
+			"blockquote", "dd", "div", "dl", "dt", "figcaption", "figure",
+			"hr", "li", "menu", "ol", "p", "pre", "ul",
+			"a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn",
+			"em", "i", "kbd", "mark", "q",
+			"rb", "rp", "rt", "rtc", "ruby",
+			"s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var", "wbr",
+			"caption", "col", "colgroup", "table", "tbody", "td", "tfoot", "th",
+			"thead", "tr",
 		},
 		AllowedAttributes: map[string][]string{
 			"a":   {"href", "name", "target"},
-			"img": {"src", "srcset", "alt", "title", "width", "height"},
+			"img": {"src", "srcset", "alt", "title", "width", "height", "loading"},
 		},
 	}
 }
@@ -99,11 +110,25 @@ type token struct {
 	name        string // tag name for tokenStart/tokenEnd
 	attrs       []attribute
 	selfClosing bool
+	nonText     bool   // start tag is a non-text element (script/style/textarea/option)
+	rawContent  string // raw inner content captured for a nonText start tag
+}
+
+// nonTextTags are the elements whose textual content is not treated as
+// renderable HTML. Mirrors the upstream default nonTextTags list. When such a
+// tag is not allowed, both the tag and its content are dropped; when it is
+// allowed, its raw content is preserved verbatim.
+var nonTextTags = map[string]bool{
+	"script":   true,
+	"style":    true,
+	"textarea": true,
+	"option":   true,
 }
 
 // Sanitize returns htmlStr with disallowed tags and attributes removed
 // according to opts. Text content of disallowed tags is kept; the contents of
-// <script> and <style> elements are removed entirely.
+// disallowed non-text elements (<script>, <style>, <textarea>, <option>) are
+// removed entirely.
 func Sanitize(htmlStr string, opts Options) string {
 	allowedTags := make(map[string]bool, len(opts.AllowedTags))
 	allowAll := false
@@ -125,6 +150,14 @@ func Sanitize(htmlStr string, opts Options) string {
 		case tokenStart:
 			if allowAll || allowedTags[tok.name] {
 				b.WriteString(serializeStart(tok, opts))
+				if tok.nonText {
+					b.WriteString(tok.rawContent)
+					if !tok.selfClosing {
+						b.WriteString("</")
+						b.WriteString(tok.name)
+						b.WriteByte('>')
+					}
+				}
 			}
 		case tokenEnd:
 			if allowAll || allowedTags[tok.name] {
@@ -182,8 +215,8 @@ func attrAllowed(tag, attrName string, opts Options) bool {
 }
 
 // tokenize scans s into a flat list of text, start-tag, and end-tag tokens.
-// Comments and declarations are dropped. Script and style element contents are
-// consumed and discarded.
+// Comments and declarations are dropped. Non-text element contents
+// (script/style/textarea/option) are captured on the start token.
 func tokenize(s string) []token {
 	var tokens []token
 	i := 0
@@ -235,24 +268,30 @@ func tokenize(s string) []token {
 		if i+1 < len(s) && isLetter(s[i+1]) {
 			tok, next, ok := parseStartTag(s, i)
 			if ok {
-				tokens = append(tokens, tok)
 				i = next
-				// Discard raw contents of script/style elements.
-				if !tok.selfClosing && (tok.name == "script" || tok.name == "style") {
+				// Capture the raw contents of non-text elements
+				// (script/style/textarea/option). The content is stored on the
+				// start token so Sanitize can preserve it when the tag is allowed
+				// and drop it, along with the tag, when it is not.
+				if !tok.selfClosing && nonTextTags[tok.name] {
+					tok.nonText = true
 					rest := s[i:]
 					closeIdx := indexCloseTag(rest, tok.name)
 					if closeIdx == -1 {
+						tok.rawContent = rest
 						i = len(s)
 					} else {
 						gt := strings.IndexByte(rest[closeIdx:], '>')
 						if gt == -1 {
+							tok.rawContent = rest
 							i = len(s)
 						} else {
-							tokens = append(tokens, token{kind: tokenEnd, name: tok.name})
+							tok.rawContent = rest[:closeIdx]
 							i += closeIdx + gt + 1
 						}
 					}
 				}
+				tokens = append(tokens, tok)
 				continue
 			}
 		}

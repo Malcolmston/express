@@ -48,6 +48,26 @@ import (
 	"strings"
 )
 
+// disallowedKeys mirrors dot-prop's prototype-pollution guard: a path whose
+// segments include any of these keys is treated as if it does not resolve, so
+// Get/Has report absence, and Set/Delete are no-ops. Upstream collapses such a
+// path to empty, yielding the default value on read and no mutation on write.
+var disallowedKeys = map[string]struct{}{
+	"__proto__":   {},
+	"prototype":   {},
+	"constructor": {},
+}
+
+// hasDisallowedSegment reports whether any segment is a guarded key.
+func hasDisallowedSegment(segments []string) bool {
+	for _, s := range segments {
+		if _, bad := disallowedKeys[s]; bad {
+			return true
+		}
+	}
+	return false
+}
+
 // parsePath splits a dotted path into its individual segments, honoring
 // backslash escaping of the dot separator (and of the backslash itself).
 func parsePath(path string) []string {
@@ -87,6 +107,9 @@ func Get(obj map[string]any, path string) (any, bool) {
 		return nil, false
 	}
 	segments := parsePath(path)
+	if hasDisallowedSegment(segments) {
+		return nil, false
+	}
 	var current any = obj
 	for _, seg := range segments {
 		switch node := current.(type) {
@@ -124,6 +147,9 @@ func Set(obj map[string]any, path string, value any) map[string]any {
 		return obj
 	}
 	segments := parsePath(path)
+	if hasDisallowedSegment(segments) {
+		return obj
+	}
 	current := obj
 	for i := 0; i < len(segments)-1; i++ {
 		seg := segments[i]
@@ -145,6 +171,9 @@ func Delete(obj map[string]any, path string) bool {
 		return false
 	}
 	segments := parsePath(path)
+	if hasDisallowedSegment(segments) {
+		return false
+	}
 	current := obj
 	for i := 0; i < len(segments)-1; i++ {
 		next, ok := current[segments[i]].(map[string]any)

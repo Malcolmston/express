@@ -83,10 +83,12 @@ func URL(c Config) string {
 	add := func(k, v string) {
 		params = append(params, encode(k)+"="+encode(v))
 	}
-	add("secret", c.Secret)
+	// Upstream (hectorm/otpauth) emits the issuer parameter before the secret
+	// in its canonical toString() output; match that ordering for parity.
 	if c.Issuer != "" {
 		add("issuer", c.Issuer)
 	}
+	add("secret", c.Secret)
 	if c.Algorithm != "" {
 		add("algorithm", c.Algorithm)
 	}
