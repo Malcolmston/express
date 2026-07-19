@@ -1,0 +1,109 @@
+// Code generated for upstream-parity testing. DO NOT rely on for anything else.
+//
+// Sources of the canonical vectors embedded below:
+//
+//  1. hectorm/otpauth test suite (the library this package ports):
+//     https://raw.githubusercontent.com/hectorm/otpauth/master/test/test.mjs
+//     Each case there constructs an OTPAuth.TOTP with a Base32 secret,
+//     algorithm, period and digits, then calls generate({timestamp}) where
+//     timestamp is in milliseconds. All embedded cases use timestamp
+//     1451606400000 ms (= Unix 1451606400 s). Only cases whose algorithm is
+//     one of SHA1/SHA256/SHA512 (the algorithms this port supports) are
+//     included; sha224/sha384/sha3-* cases are intentionally omitted.
+//
+//  2. RFC 6238 Appendix B published TOTP table (8 digits, period 30) with the
+//     three ASCII seeds "12345678901234567890" (SHA1),
+//     "12345678901234567890123456789012" (SHA256) and the 64-byte SHA512 seed,
+//     Base32-encoded. https://datatracker.ietf.org/doc/html/rfc6238#appendix-B
+
+package totp
+
+import (
+	"testing"
+	"time"
+)
+
+// TestParityOtpauth checks GenerateAt against the hectorm/otpauth test vectors.
+func TestParityOtpauth(t *testing.T) {
+	const tsMillis = 1451606400000
+	cases := []struct {
+		name   string
+		secret string
+		alg    string
+		period int
+		digits int
+		want   string
+	}{
+		{"case00", "6OWYXIW7QEYH34MFXCCXPZUBQDTIXBSX5GPKX4MSU2W6NHFNY2DOTEVK5OILVXN33GB6HN4QHHYLDN4AFTZZNH476KG3RAWESDUKZNHQW2KJLYMLTBHNJNPSTW33J4MAWWKNHPA", "SHA1", 5, 6, "757316"},
+		{"case01", "E3HL4LDW4KZL3ZV5RPWZPJPQT6KJLWFBFXQ2HJHSX2KZNSEA6KU3HERRY2J7HMNFTHYL5AVLE3BJJ2FPSHY3RKUU4SQIP4ESW64WERGXWXPLLUNL5K53DRVW4643A", "SHA256", 10, 6, "043840"},
+		{"case02", "6OU2XBPNRSZTDXMS46VKJ4VCTC26ZBFJPHUK3LHRXSF27Y4LR7X37PPJVGU53LHCSOGMFPPDSWB7JB5YQLWLBF7TXS2JD4M7QSDNFL7QTSIJP4E7TKPUF4EUTSUPDNEZU7M3Z2MRWLZ3RA5I5OLLV4ULQOEQ", "SHA512", 15, 6, "665593"},
+		{"case03", "OR6O5BU2ZCD6PPEJ6OB2LKW5SXUZ7LJM6KS3ND7PX664ZOTWZOY6JJN24KX3N2FPVPT3BA7RXO6ISLJN26MOLF4O6GDK3AHTQ6S3XY4PW7UITDRA6OUZPCGVU7Z2HHE34KL2G", "SHA1", 30, 6, "329537"},
+		{"case04", "ZC6HDZFVQHH2TWMO6CV3ZPXRVGW3BRVH6G2JDOPCW255LBOWVHXIRC7AUSJMRAGWSXR33I7HWGE5PDOGVLHZXZVLXIQ7FA5MXQ3MTO7LQC4WDRMG6CV2LJO6WUZA", "SHA1", 30, 7, "0565981"},
+		{"case05", "E3NK2X7FWS3ONJ5BPTZ3FD5Q3CWNDDDV6C5LRCHRVOC2L2EHV3TZHC265OOJ2M7SW2H3B4NPWOVCXVFM6GE3TD7QWK5ZX4ESWCKO7CFC3ODPDCNCQPRIPN7DS6WTRZMGSXZKJGEK", "SHA1", 30, 8, "29100432"},
+		{"case06", "OR6O5BU2ZCD6PPEJ6OB2LKW5SXUZ7LJM6KS3ND7PX664ZOTWZOY6JJN24KX3N2FPVPT3BA7RXO6ISLJN26MOLF4O6GDK3AHTQ6S3XY4PW7UITDRA6OUZPCGVU7Z2HHE34KL2G", "SHA1", 30, 6, "329537"},
+		{"case07", "6O3YZEW2WXZKTDE73CLMLJWESPX35H234OAKXZUNSD2IHBMP5S32WRHEVKPVLS5V6GCYREXQUWMILYFBULULRLHUQO4LKUHTVCSJD2E3VHQ2LESS5S72ZTVV567334FHQK5SK2Q", "SHA1", 30, 6, "724410"},
+		{"case08", "6COYZA7FRCFMJM6YQ3ZYPBFGJ3U25C7LQ6B4PPGKSBR6NKMN5KZ3IKSS5GF2Z3MFSDHJNXEX6O4ZDIHQVSA2N2F3VBTMNN62VDTJXMDSYSG7DFNNVHTK3EHSXKL3B3FDRA", "SHA1", 30, 6, "003038"},
+		{"case09", "PTV3HJTL6KY3XBHHTCFUD2UDUHZYZKNFFXYZTP4Z56733Q4VL7R3HGPNRSE6HPEJ3GD67H44M7L3II7PX666DNVP6O2YFLHRRGWZJY4ZX7R3LFGURPPLV357XXYZ7BM56KZKLFQ", "SHA1", 30, 6, "218265"},
+		{"case10", "PXM372MNVTQYJBHBV2Q53JPTUSX2BUUZ22RFMLWHUDYZHDMOYKIFX4USQKUPFGUUWZJ7BO4MXPSZFJOWWYR7HLFFXRZ7BFMHQDYYFJ5H5KR3QMR7JPY3PMN6I4", "SHA1", 30, 6, "514422"},
+		{"case11", "4GSINR5NIPKI5X53ZWBNPEGLQXBICI3HYWP6LINNZCNC3Q44LV55RCXEUWYXR3MSTHYJLDFP2KZ5JEPIUKPNBJLMYWYTD3VMS7HYG", "sha1", 5, 6, "245126"},
+		{"case13", "YOMPHP53RTP3T4VVUW3PBHFGSLZ3FBNR562YGZPFQCMPHDETTZHONKVJFBB5LH2S4WHKFTNY4OL25TF2YSN4LBWSWHYLJNM32KBORFFP6GFIDIXMWST65DE3G3SZJJJY", "sha256", 5, 6, "723212"},
+		{"case15", "YOXPBOERXTY2DA5I52VY3W4P6SFIVGOOUDN3DRMYZCKUNZFVUTYJPKUH5CFZHWU4ZCKCFZMAT3ZLPPE7ZW75TIG4THYZZO5WN7YJDK446KNYBJGKQV3EQMKMYWFQ", "sha-512", 5, 6, "912745"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			opts := &Options{Digits: c.digits, Period: c.period, Algorithm: c.alg}
+			at := time.Unix(tsMillis/1000, 0).UTC()
+			got, err := GenerateAt(c.secret, at, opts)
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", c.name, err)
+			}
+			if got != c.want {
+				t.Errorf("%s (alg=%s period=%d digits=%d): got %q, want %q", c.name, c.alg, c.period, c.digits, got, c.want)
+			}
+		})
+	}
+}
+
+// TestParityRFC6238 checks GenerateAt against the RFC 6238 Appendix B table.
+func TestParityRFC6238(t *testing.T) {
+	const (
+		seedSHA1   = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+		seedSHA256 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA===="
+		seedSHA512 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNA="
+	)
+	cases := []struct {
+		unix   int64
+		alg    string
+		secret string
+		want   string
+	}{
+		{59, "SHA1", seedSHA1, "94287082"},
+		{59, "SHA256", seedSHA256, "46119246"},
+		{59, "SHA512", seedSHA512, "90693936"},
+		{1111111109, "SHA1", seedSHA1, "07081804"},
+		{1111111109, "SHA256", seedSHA256, "68084774"},
+		{1111111109, "SHA512", seedSHA512, "25091201"},
+		{1111111111, "SHA1", seedSHA1, "14050471"},
+		{1111111111, "SHA256", seedSHA256, "67062674"},
+		{1111111111, "SHA512", seedSHA512, "99943326"},
+		{1234567890, "SHA1", seedSHA1, "89005924"},
+		{1234567890, "SHA256", seedSHA256, "91819424"},
+		{1234567890, "SHA512", seedSHA512, "93441116"},
+		{2000000000, "SHA1", seedSHA1, "69279037"},
+		{2000000000, "SHA256", seedSHA256, "90698825"},
+		{2000000000, "SHA512", seedSHA512, "38618901"},
+		{20000000000, "SHA1", seedSHA1, "65353130"},
+		{20000000000, "SHA256", seedSHA256, "77737706"},
+		{20000000000, "SHA512", seedSHA512, "47863826"},
+	}
+	opts := func(a string) *Options { return &Options{Digits: 8, Period: 30, Algorithm: a} }
+	for _, c := range cases {
+		got, err := GenerateAt(c.secret, time.Unix(c.unix, 0).UTC(), opts(c.alg))
+		if err != nil {
+			t.Fatalf("unix %d %s: unexpected error: %v", c.unix, c.alg, err)
+		}
+		if got != c.want {
+			t.Errorf("unix %d %s: got %q, want %q", c.unix, c.alg, got, c.want)
+		}
+	}
+}

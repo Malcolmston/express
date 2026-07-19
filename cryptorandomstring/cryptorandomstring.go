@@ -53,9 +53,9 @@ import (
 const (
 	hexChars             = "0123456789abcdef"
 	numericChars         = "0123456789"
-	distinguishableChars = "CDEHKMPRTUWXY012458964"
+	distinguishableChars = "CDEHKMPRTUWXY012458"
 	alphanumericChars    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	urlSafeChars         = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	urlSafeChars         = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 	base64Chars          = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 	asciiPrintableChars  = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 )

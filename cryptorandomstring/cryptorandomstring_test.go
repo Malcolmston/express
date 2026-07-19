@@ -41,7 +41,7 @@ func TestURLSafeCharset(t *testing.T) {
 	}
 	for _, r := range s {
 		ok := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_'
+			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' || r == '~'
 		if !ok {
 			t.Fatalf("url-safe out-of-range char %q", r)
 		}

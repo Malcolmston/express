@@ -90,7 +90,9 @@ func applyDefaults(opts *Options) Options {
 }
 
 func hashFor(algorithm string) (func() hash.Hash, error) {
-	switch strings.ToUpper(algorithm) {
+	// Normalize like hectorm/otpauth: upper-case and drop separators so that
+	// spellings such as "sha-512" and "SHA512" are treated identically.
+	switch strings.ReplaceAll(strings.ToUpper(algorithm), "-", "") {
 	case "SHA1", "":
 		return sha1.New, nil
 	case "SHA256":
