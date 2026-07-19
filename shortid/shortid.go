@@ -107,10 +107,12 @@ func Generate() (string, error) {
 	return string(out), nil
 }
 
-// IsValid reports whether s is non-empty and contains only characters from the
-// current alphabet.
+// IsValid reports whether s is a plausible shortid: it must be at least six
+// characters long and contain only characters from the current alphabet. The
+// minimum-length check mirrors the upstream npm "shortid" is-valid.js, which
+// rejects any id shorter than six characters.
 func IsValid(s string) bool {
-	if s == "" {
+	if len([]rune(s)) < 6 {
 		return false
 	}
 	mu.Lock()
