@@ -6,29 +6,32 @@ import (
 	"github.com/malcolmston/express/titlecase"
 )
 
-// ExampleTitleCase capitalizes the first letter of each word in a plain phrase.
-// The input is split into words on whitespace, each word is recased so its first
-// letter is uppercase and the rest lowercase, and the words are rejoined with a
-// single space. Here "hello world" becomes "Hello World". Every word is
-// capitalized, since this package does not implement small-word handling for
-// function words like "of" or "the". The transformation is deterministic and
-// depends only on the input.
+// ExampleTitleCase capitalizes the significant words of a plain phrase while
+// leaving small function words such as "of" and "the" in lower case
+// mid-sentence, matching the upstream change-case title-case library. Here
+// "the quick brown fox jumps over the lazy dog" keeps "over" and the interior
+// "the" lower case.
 func ExampleTitleCase() {
-	fmt.Println(titlecase.TitleCase("hello world"))
-	// Output: Hello World
+	fmt.Println(titlecase.TitleCase("the quick brown fox jumps over the lazy dog"))
+	// Output: The Quick Brown Fox Jumps over the Lazy Dog
 }
 
-// ExampleTitleCase_boundaries shows the word-boundary detection that makes the
-// function robust across casing and separator styles. A camelCase boundary in
-// "helloWorld" splits into "hello" and "World", and runs of punctuation or
-// underscores and hyphens in "foo_bar-baz" separate three words. Each detected
-// word is then capitalized independently and joined with single spaces, so mixed
-// or repeated separators collapse to one space. This is why identifiers from
-// code convert cleanly into human-friendly display strings.
-func ExampleTitleCase_boundaries() {
-	fmt.Println(titlecase.TitleCase("helloWorld"))
-	fmt.Println(titlecase.TitleCase("foo_bar-baz"))
+// ExampleTitleCase_preserved shows that the transformation never lower-cases
+// letters: acronyms like "NASA" and manually cased words like "camelCase" pass
+// through unchanged, and only the first letter of each capitalized word is
+// upper-cased.
+func ExampleTitleCase_preserved() {
+	fmt.Println(titlecase.TitleCase("we keep NASA capitalized"))
+	fmt.Println(titlecase.TitleCase("pass camelCase through"))
 	// Output:
-	// Hello World
-	// Foo Bar Baz
+	// We Keep NASA Capitalized
+	// Pass camelCase Through
+}
+
+// ExampleTitleCase_sentenceCase demonstrates the SentenceCase option, which
+// capitalizes only the first word of each sentence rather than every
+// significant word.
+func ExampleTitleCase_sentenceCase() {
+	fmt.Println(titlecase.TitleCase("the iPhone: a quote", titlecase.Options{SentenceCase: true}))
+	// Output: The iPhone: a quote
 }

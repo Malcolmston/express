@@ -53,24 +53,38 @@ type HSV struct {
 	V float64
 }
 
-// HexToRGB parses a CSS hex colour ("#rgb", "#rrggbb", or the same without the
-// leading '#') and returns the RGB colour. It returns an error for malformed
-// input.
+// HexToRGB parses a CSS hex colour and returns the RGB colour. It accepts the
+// three-nibble ("#rgb"), four-nibble ("#rgba"), six-digit ("#rrggbb") and
+// eight-digit ("#rrggbbaa") forms, with or without the leading '#'. For the
+// alpha-bearing forms the alpha channel is parsed for validation but discarded,
+// since RGB has no alpha component. It returns an error for malformed input.
 func HexToRGB(hex string) (RGB, error) {
 	s := strings.TrimSpace(hex)
 	s = strings.TrimPrefix(s, "#")
 	switch len(s) {
-	case 3:
-		r, err1 := colHexNibble(s[0])
-		g, err2 := colHexNibble(s[1])
-		b, err3 := colHexNibble(s[2])
-		if err1 != nil || err2 != nil || err3 != nil {
+	case 3, 4:
+		// "#rgb" and "#rgba": each nibble is doubled. The optional fourth
+		// nibble is alpha, which is validated but not represented in RGB.
+		var vals [4]uint8
+		ok := true
+		for i := 0; i < len(s); i++ {
+			n, err := colHexNibble(s[i])
+			if err != nil {
+				ok = false
+				break
+			}
+			vals[i] = n*16 + n
+		}
+		if !ok {
 			return RGB{}, fmt.Errorf("color: invalid hex %q", hex)
 		}
-		return RGB{R: r*16 + r, G: g*16 + g, B: b*16 + b}, nil
-	case 6:
-		var vals [3]uint8
-		for i := 0; i < 3; i++ {
+		return RGB{R: vals[0], G: vals[1], B: vals[2]}, nil
+	case 6, 8:
+		// "#rrggbb" and "#rrggbbaa": the trailing byte pair is alpha, which is
+		// validated but not represented in RGB.
+		pairs := len(s) / 2
+		var vals [4]uint8
+		for i := 0; i < pairs; i++ {
 			hi, err1 := colHexNibble(s[i*2])
 			lo, err2 := colHexNibble(s[i*2+1])
 			if err1 != nil || err2 != nil {

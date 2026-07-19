@@ -37,6 +37,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"math/big"
+	"strings"
 )
 
 const (
@@ -93,4 +94,97 @@ func Generate(length int, charset string) (string, error) {
 // New returns a 32-character alphanumeric random string.
 func New() (string, error) {
 	return Generate(32, "alphanumeric")
+}
+
+// Options mirrors the options object accepted by the npm original's
+// randomstring.generate(options). It groups the length, character-set
+// selection, capitalization, and readability controls that the JavaScript
+// version exposes on a single object.
+//
+// Charset holds one or more entries; each entry is resolved with the same rule
+// the upstream Charset.getCharacters uses: a recognized preset name
+// ("alphanumeric", "alphabetic", "numeric", "hex", "binary", "octal") expands
+// to that preset's characters, and any other value is treated as a literal set
+// of characters. Multiple entries are concatenated, matching upstream's support
+// for an array of charsets (for example []string{"alphabetic", "!"}). An empty
+// Charset defaults to "alphanumeric".
+//
+// Capitalization is "uppercase", "lowercase", or "" (leave as-is), applied to
+// the assembled character set before sampling, exactly as upstream does.
+// Readable, when true, removes the visually ambiguous characters 0, O, I, and l
+// from the set. After these transforms duplicate characters are removed so that
+// sampling stays uniform, matching upstream's removeDuplicates step.
+type Options struct {
+	Length         int
+	Charset        []string
+	Capitalization string
+	Readable       bool
+}
+
+// getCharacters resolves a single charset entry, mirroring upstream's
+// Charset.getCharacters: a known preset name expands to its characters, and any
+// other value is returned as a literal character set.
+func getCharacters(entry string) string {
+	if chars, ok := presets[entry]; ok {
+		return chars
+	}
+	return entry
+}
+
+// removeUnreadable drops the visually ambiguous characters 0, O, I, and l,
+// mirroring upstream's Charset.removeUnreadable (/[0OIl]/g).
+func removeUnreadable(chars string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '0', 'O', 'I', 'l':
+			return -1
+		default:
+			return r
+		}
+	}, chars)
+}
+
+// removeDuplicates removes repeated characters while preserving first-seen
+// order, mirroring upstream's Charset.removeDuplicates.
+func removeDuplicates(chars string) string {
+	seen := make(map[rune]bool)
+	var b strings.Builder
+	for _, r := range chars {
+		if !seen[r] {
+			seen[r] = true
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// GenerateWith returns a random string built from opts, reproducing the
+// character-set pipeline of the npm original's generate(options): the charset
+// entries are resolved and concatenated, capitalization is applied, unreadable
+// characters are optionally removed, and duplicates are stripped before uniform
+// sampling with crypto/rand.
+func GenerateWith(opts Options) (string, error) {
+	var chars string
+	if len(opts.Charset) == 0 {
+		chars = presets["alphanumeric"]
+	} else {
+		for _, entry := range opts.Charset {
+			chars += getCharacters(entry)
+		}
+	}
+
+	switch opts.Capitalization {
+	case "uppercase":
+		chars = strings.ToUpper(chars)
+	case "lowercase":
+		chars = strings.ToLower(chars)
+	}
+
+	if opts.Readable {
+		chars = removeUnreadable(chars)
+	}
+
+	chars = removeDuplicates(chars)
+
+	return GenerateFrom(opts.Length, chars)
 }
