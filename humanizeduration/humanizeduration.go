@@ -30,7 +30,8 @@
 // duration reduces to nothing, a single zero-valued phrase built from the
 // smallest configured unit is returned, which is why Humanize(0) yields
 // "0 seconds" rather than an empty string. Negative inputs are formatted from
-// their absolute value and prefixed with "-", and counts are pluralized so that
+// their absolute value with no sign prefix (matching humanize-duration's
+// Math.abs handling), and counts are pluralized so that
 // exactly 1 uses the singular name and any other value uses the plural.
 //
 // Parity with Node is close but not total. The port covers English output and
@@ -119,9 +120,10 @@ func HumanizeOpts(ms int64, opts Options) string {
 		spacer = " "
 	}
 
+	// Upstream (humanize-duration) applies Math.abs to the input, so a negative
+	// duration renders identically to its magnitude with no sign prefix.
 	value := float64(ms)
-	negative := value < 0
-	if negative {
+	if value < 0 {
 		value = -value
 	}
 
@@ -180,11 +182,7 @@ func HumanizeOpts(ms int64, opts Options) string {
 	for i, p := range result {
 		parts[i] = renderPiece(p.count, p.name, spacer)
 	}
-	s := strings.Join(parts, delimiter)
-	if negative {
-		s = "-" + s
-	}
-	return s
+	return strings.Join(parts, delimiter)
 }
 
 // renderPiece formats a single count/unit pair, pluralizing as needed.

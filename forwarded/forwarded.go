@@ -22,9 +22,10 @@
 //
 // Several edge cases are handled to preserve parity with the Node original.
 // An empty or missing header yields a single-element slice containing only the
-// remote address. Each header entry is trimmed of surrounding whitespace, but
-// empty entries (for example from a "a,,b" value) are preserved as empty
-// strings rather than being dropped. Port stripping understands IPv4
+// remote address. Each header entry is trimmed of surrounding whitespace, and
+// blank entries (for example from a "a,,b" value) are skipped rather than
+// preserved as empty strings, matching the npm module. Port stripping
+// understands IPv4
 // "host:port", bracketed IPv6 "[::1]:8080" and "[::1]" forms, and bare IPv6
 // literals such as "::1" or "2001:db8::1", which are returned unchanged because
 // they carry no port. Malformed input is never rejected; it is returned as-is.
@@ -49,8 +50,8 @@ import (
 // The first element is remoteAddr (with any port stripped). The remaining
 // elements are the comma-separated entries of the X-Forwarded-For value (xff),
 // trimmed of surrounding whitespace and appended from the rightmost entry to
-// the leftmost entry. Empty entries in the header are preserved as empty
-// strings, matching the behavior of the npm "forwarded" module.
+// the leftmost entry. Blank entries in the header (empty after trimming) are
+// skipped, matching the behavior of the npm "forwarded" module.
 func Forwarded(remoteAddr string, xff string) []string {
 	addrs := []string{stripPort(remoteAddr)}
 
@@ -59,9 +60,15 @@ func Forwarded(remoteAddr string, xff string) []string {
 	}
 
 	parts := strings.Split(xff, ",")
-	// Push entries from rightmost to leftmost (closest proxy first).
+	// Push entries from rightmost to leftmost (closest proxy first). Blank
+	// entries (empty after trimming surrounding whitespace) are skipped,
+	// matching the npm "forwarded" module.
 	for i := len(parts) - 1; i >= 0; i-- {
-		addrs = append(addrs, strings.TrimSpace(parts[i]))
+		entry := strings.TrimSpace(parts[i])
+		if entry == "" {
+			continue
+		}
+		addrs = append(addrs, entry)
 	}
 
 	return addrs

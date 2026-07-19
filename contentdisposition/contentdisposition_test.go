@@ -28,7 +28,7 @@ func TestFormatNoFilename(t *testing.T) {
 
 func TestFormatUTF8(t *testing.T) {
 	got := Format("€ rates.txt")
-	want := `attachment; filename="??? rates.txt"; filename*=UTF-8''%e2%82%ac%20rates.txt`
+	want := `attachment; filename="? rates.txt"; filename*=UTF-8''%E2%82%AC%20rates.txt`
 	if got != want {
 		t.Fatalf("Format = %q, want %q", got, want)
 	}

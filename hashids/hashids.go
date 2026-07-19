@@ -30,8 +30,9 @@
 //
 // Construct a codec with New, which uses DefaultAlphabet, or with
 // NewWithAlphabet to supply your own. The alphabet is deduplicated while
-// preserving order and must contain at least 16 unique characters and no
-// spaces; otherwise construction returns an error. The minimum length is
+// preserving order and must contain at least 16 unique characters; otherwise
+// construction returns an error. As in the reference library, spaces are
+// permitted in the alphabet. The minimum length is
 // clamped to zero if negative. Encode accepts any number of non-negative
 // int64 values: encoding no numbers returns the empty string, and encoding a
 // negative number returns an error, since Hashids only models non-negative
@@ -86,13 +87,11 @@ func NewWithAlphabet(salt string, minLength int, alphabet string) (*HashID, erro
 	}
 	saltRunes := []rune(salt)
 
-	// Deduplicate the alphabet, preserving order.
+	// Deduplicate the alphabet, preserving order. Spaces are permitted:
+	// upstream (niieani/hashids.js) accepts alphabets containing spaces.
 	seen := make(map[rune]bool)
 	uniq := make([]rune, 0, len(alphabet))
 	for _, r := range alphabet {
-		if r == ' ' {
-			return nil, errors.New("hashids: alphabet must not contain spaces")
-		}
 		if !seen[r] {
 			seen[r] = true
 			uniq = append(uniq, r)

@@ -23,7 +23,7 @@ func TestCamelCase(t *testing.T) {
 		{"Foo", "foo"},
 		{"", ""},
 		{"   ", ""},
-		{"___", ""},
+		{"___", "___"}, // upstream v9 preserves leading underscores
 		{"HTTPServer", "httpServer"},
 		{"a", "a"},
 		{"A", "a"},

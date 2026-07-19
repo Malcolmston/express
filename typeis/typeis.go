@@ -8,175 +8,224 @@
 // convenience question like "is this JSON?" rather than compare strings.
 //
 // The high-level entry point is Is, which takes a concrete Content-Type value
-// and one or more candidate patterns and returns the matched candidate (in its
-// full, normalized form) together with a boolean. Candidates may be written in
-// several convenient shapes: a full type such as "application/json"; an
-// extension-style shorthand such as "json", "html", "urlencoded", or
-// "multipart"; a wildcard such as "*/*", "text/*", or "*/json"; or a structured
-// "+suffix" match such as "+json" that matches any subtype ending in that
-// suffix. When no candidates are supplied, Is simply reports whether the value
-// is a non-empty, parseable type and echoes it back.
+// and one or more candidate patterns and returns the matched candidate together
+// with a boolean. Candidates may be written in several convenient shapes: a full
+// type such as "application/json"; an extension-style shorthand such as "json",
+// "html", or "png"; the specials "urlencoded" and "multipart"; a wildcard such
+// as "*/*", "text/*", or "*/json"; or a structured "+suffix" match such as
+// "+json" that matches any subtype ending in that suffix. When no candidates are
+// supplied, Is reports whether the value is a non-empty, valid type and echoes
+// it back.
 //
-// Internally each candidate is first expanded into a matchable pattern. A
-// recognised shorthand is replaced by its full type from a small lookup table
-// (for example "form" and "urlencoded" both become
-// "application/x-www-form-urlencoded", and "multipart" becomes "multipart/*");
-// a leading "+suffix" becomes "*/*+suffix"; and a bare token containing no
-// slash is treated as an extension and falls back to "application/<token>". The
-// concrete value being tested is normalized by stripping any ";"-delimited
-// parameters and lower-casing what remains, so the charset and boundary
-// parameters that real headers carry never affect the match.
+// Following the Node original, Is's returned string mirrors the matched
+// candidate: when the matching candidate contains a "*" wildcard or begins with
+// "+", Is returns the concrete (normalized) value that was tested; otherwise it
+// returns the candidate exactly as it was supplied (for example "json",
+// "urlencoded", or "multipart"). If nothing matches it returns "" and false.
+//
+// Internally each candidate is first expanded by Normalize into a matchable
+// pattern: the specials "urlencoded" and "multipart" expand to their full
+// forms; a leading "+suffix" becomes "*/*+suffix"; a bare extension token (no
+// slash) is resolved through a small MIME table, and an unrecognised extension
+// is treated as no match (matching the upstream mime.lookup returning false);
+// everything containing a slash is passed through unchanged. The concrete value
+// being tested is normalized by NormalizeType, which strips any ";"-delimited
+// parameters, lower-cases what remains, and validates it as a real
+// "type/subtype" (so a bogus value such as "bogus" or "text/html**" never
+// matches anything).
 //
 // Match performs the actual comparison of an expected pattern against a
 // concrete type. It supports "*" wildcards in either the type or the subtype
-// position and understands the "type/subtype+suffix" structure: an expected
-// "+json" matches "application/vnd.api+json" because the suffixes agree, while
-// "*/*" matches anything. An empty value on either side never matches, and two
-// non-parseable types (a missing or empty type or subtype) are treated as a
-// non-match rather than an error.
+// position and understands the "*+suffix" structure: an expected "*/*+xml"
+// matches "text/html+xml" because the suffixes agree, while "*/*" matches any
+// valid type/subtype. An empty (false) expected value never matches, and a
+// value that is not exactly "type/subtype" is treated as a non-match.
 //
-// Parity with the Node original covers the shorthand names, wildcard forms, and
-// suffix matching that Express relies on for its own body parsers. The API shape
-// is idiomatic Go: Is returns the matched pattern and an ok boolean instead of
-// JavaScript's string-or-false union, and the package deliberately omits helpers
-// that depend on a live request object (such as reading the body length header),
-// leaving those to the surrounding framework.
+// The API shape is idiomatic Go: Is and Normalize return an ok boolean instead
+// of JavaScript's string-or-false union, and the package deliberately omits the
+// helpers that depend on a live request object (typeis.hasBody and the
+// request-object form of typeis), leaving those to the surrounding framework.
 package typeis
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
-// shorthand maps common extension-style names to full MIME types (or
-// wildcards) as recognised by the npm type-is package.
-var shorthand = map[string]string{
-	"json":       "application/json",
-	"html":       "text/html",
-	"text":       "text/plain",
-	"xml":        "application/xml",
-	"urlencoded": "application/x-www-form-urlencoded",
-	"multipart":  "multipart/*",
-	"form":       "application/x-www-form-urlencoded",
-	"js":         "application/javascript",
-	"css":        "text/css",
+// mimeExt maps extension-style names to full MIME types, standing in for the
+// npm mime-types database that the original type-is consults via mime.lookup.
+// An extension that is not present here resolves to no match, exactly as an
+// unknown extension yields false from mime.lookup upstream.
+var mimeExt = map[string]string{
+	"json": "application/json",
+	"html": "text/html",
+	"htm":  "text/html",
+	"xml":  "application/xml",
+	"text": "text/plain",
+	"txt":  "text/plain",
+	"js":   "application/javascript",
+	"css":  "text/css",
+	"png":  "image/png",
+	"jpeg": "image/jpeg",
+	"jpg":  "image/jpeg",
+	"gif":  "image/gif",
 }
 
-// normalizeType strips any parameters (e.g. "; charset=utf-8") from a
-// Content-Type value and lower-cases it.
-func normalizeType(ct string) string {
-	ct = strings.TrimSpace(ct)
+// mediaTypeRe validates a normalized, lower-cased "type/subtype" value. The
+// character classes mirror media-typer's grammar: the type name allows no "."
+// or "+", the subtype name additionally allows "." and "+" (for suffixes), and
+// neither allows "*". This is what makes values like "bogus" (no slash) or
+// "text/html**" (invalid character) fail to normalize.
+var mediaTypeRe = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$`)
+
+// lookupExtension resolves a bare extension token (with or without a leading
+// dot) to a full MIME type, returning "" when the extension is unknown.
+func lookupExtension(t string) string {
+	e := strings.ToLower(t)
+	e = strings.TrimPrefix(e, ".")
+	if m, ok := mimeExt[e]; ok {
+		return m
+	}
+	return ""
+}
+
+// NormalizeType strips any parameters (e.g. "; charset=utf-8") from a
+// Content-Type value, lower-cases it, and validates it as a "type/subtype"
+// media type. It returns "" for an empty or invalid value.
+func NormalizeType(value string) string {
+	if value == "" {
+		return ""
+	}
+	ct := value
 	if i := strings.IndexByte(ct, ';'); i >= 0 {
 		ct = ct[:i]
 	}
-	return strings.ToLower(strings.TrimSpace(ct))
-}
-
-// expand converts a candidate (which may be a shorthand, a "+suffix", or a
-// full/wildcard type) into a matchable pattern.
-func expand(candidate string) string {
-	c := strings.ToLower(strings.TrimSpace(candidate))
-	if c == "" {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	if !mediaTypeRe.MatchString(ct) {
 		return ""
 	}
-	if full, ok := shorthand[c]; ok {
-		return full
-	}
-	// A leading "+suffix" becomes "*/*+suffix".
-	if strings.HasPrefix(c, "+") {
-		return "*/*" + c
-	}
-	// A bare token with no slash and no plus is treated as an extension
-	// shorthand; if unknown, fall back to application/<token>.
-	if !strings.ContainsRune(c, '/') {
-		return "application/" + c
-	}
-	return c
+	return ct
 }
 
-// splitType splits a normalized "type/subtype" into its parts. The subtype is
-// further split into a base and an optional "+suffix".
-func splitType(t string) (typ, subtype, suffix string, ok bool) {
-	i := strings.IndexByte(t, '/')
-	if i < 0 {
-		return "", "", "", false
+// normalize expands a candidate into a matchable pattern, mirroring the npm
+// type-is normalize(): the specials "urlencoded" and "multipart" expand to full
+// forms, a leading "+suffix" becomes "*/*+suffix", a bare extension is resolved
+// through the MIME table (unknown => ""), and anything with a slash passes
+// through unchanged.
+func normalize(t string) string {
+	switch t {
+	case "urlencoded":
+		return "application/x-www-form-urlencoded"
+	case "multipart":
+		return "multipart/*"
 	}
-	typ = t[:i]
-	sub := t[i+1:]
-	if typ == "" || sub == "" {
-		return "", "", "", false
+	if len(t) > 0 && t[0] == '+' {
+		return "*/*" + t
 	}
-	if j := strings.LastIndexByte(sub, '+'); j >= 0 {
-		return typ, sub[:j], sub[j+1:], true
+	if !strings.Contains(t, "/") {
+		return lookupExtension(t)
 	}
-	return typ, sub, "", true
+	return t
 }
 
-// Match reports whether the actual (concrete) Content-Type matches the
-// expected pattern. The expected pattern may use "*" wildcards for the type
-// and/or subtype, and a "+suffix" on the subtype. Both arguments should be
-// full types; parameters are ignored.
-func Match(expected, actual string) bool {
-	exp := normalizeType(expected)
-	act := normalizeType(actual)
-	if exp == "" || act == "" {
-		return false
+// Normalize expands a single candidate type into its full, matchable form. It
+// returns the expanded pattern and true, or "" and false when the candidate is
+// an unknown extension. It is the exported form of the npm typeis.normalize.
+func Normalize(t string) (string, bool) {
+	n := normalize(t)
+	if n == "" {
+		return "", false
 	}
-	if exp == "*/*" {
-		return true
-	}
-	if exp == act {
-		return true
-	}
+	return n, true
+}
 
-	et, es, esuf, eok := splitType(exp)
-	at, as, asuf, aok := splitType(act)
-	if !eok || !aok {
-		return false
-	}
-
-	// Match main type.
-	if et != "*" && et != at {
+// mimeMatch reports whether the expected pattern matches the actual concrete
+// type. It is a faithful port of the npm type-is mimeMatch: "*" wildcards are
+// supported in the type and subtype positions, and a subtype beginning with
+// "*+" matches any subtype sharing the same suffix.
+func mimeMatch(expected, actual string) bool {
+	// invalid type
+	if expected == "" {
 		return false
 	}
 
-	// Suffix matching: expected "+json" (subtype base empty or "*").
-	if esuf != "" {
-		if es != "" && es != "*" {
-			// Expected has both base and suffix: require exact base and
-			// suffix match, or the actual suffix equal.
-			if es != as {
-				return false
-			}
+	actualParts := strings.Split(actual, "/")
+	expectedParts := strings.Split(expected, "/")
+
+	// invalid format
+	if len(actualParts) != 2 || len(expectedParts) != 2 {
+		return false
+	}
+
+	// validate type
+	if expectedParts[0] != "*" && expectedParts[0] != actualParts[0] {
+		return false
+	}
+
+	es := expectedParts[1]
+	as := actualParts[1]
+
+	// validate suffix wildcard: subtype starts with "*+"
+	if strings.HasPrefix(es, "*+") {
+		// expectedParts[1].length <= actualParts[1].length + 1 &&
+		//   expectedParts[1].slice(1) === actualParts[1].slice(1 - expectedParts[1].length)
+		if len(es) > len(as)+1 {
+			return false
 		}
-		return esuf == asuf
+		esSuffix := es[1:]
+		n := len(es) - 1
+		if n > len(as) {
+			return false
+		}
+		return esSuffix == as[len(as)-n:]
 	}
 
-	// No expected suffix: match subtype with wildcard support.
-	if es == "*" {
-		return true
+	// validate subtype
+	if es != "*" && es != as {
+		return false
 	}
-	return es == as && esuf == asuf
+
+	return true
+}
+
+// Match reports whether the expected mime type matches the actual mime type,
+// with "*" wildcard and "*+suffix" support. It is the exported form of the npm
+// typeis.match: both arguments are expected to be concrete "type/subtype"
+// strings (the expected side may use wildcards); no parameter stripping is
+// performed. An empty expected value never matches.
+func Match(expected, actual string) bool {
+	return mimeMatch(expected, actual)
 }
 
 // Is matches a Content-Type value against one or more candidate types. Each
 // candidate may be a full type ("application/json"), an extension shorthand
-// ("json", "html", "urlencoded", "multipart"), a wildcard ("*/*", "text/*",
-// "*/json") or a "+suffix" match ("+json"). It returns the matched candidate,
-// normalized to its full type, and true. If nothing matches it returns "" and
-// false.
+// ("json", "png"), a special ("urlencoded", "multipart"), a wildcard ("*/*",
+// "text/*", "*/json") or a "+suffix" match ("+json"). It returns the matched
+// candidate and true, or "" and false when nothing matches. When no candidates
+// are supplied it returns the normalized value and true, or "" and false if the
+// value is empty or invalid.
+//
+// The returned string follows the upstream convention: for a matching candidate
+// that contains "*" or begins with "+", the concrete (normalized) value is
+// returned; otherwise the candidate is returned exactly as supplied.
 func Is(contentType string, types ...string) (string, bool) {
-	act := normalizeType(contentType)
-	if act == "" {
+	val := NormalizeType(contentType)
+	if val == "" {
 		return "", false
 	}
 	if len(types) == 0 {
-		return act, true
+		return val, true
 	}
-	for _, candidate := range types {
-		pattern := expand(candidate)
+	for _, t := range types {
+		pattern := normalize(t)
 		if pattern == "" {
 			continue
 		}
-		if Match(pattern, act) {
-			return pattern, true
+		if mimeMatch(pattern, val) {
+			if len(t) > 0 && (t[0] == '+' || strings.ContainsRune(t, '*')) {
+				return val, true
+			}
+			return t, true
 		}
 	}
 	return "", false

@@ -89,62 +89,59 @@ func ParseRanges(size int64, header string, combine bool) (Ranges, int) {
 	}
 
 	unit := header[:idx]
-	if unit == "" {
-		return Ranges{}, ResultMalformed
-	}
-
 	out := Ranges{Type: unit}
 	specs := strings.Split(header[idx+1:], ",")
 
+	// valid records whether any spec parsed to valid numbers but was
+	// unsatisfiable (start > end). It distinguishes ResultUnsatisfiable (-1)
+	// from ResultMalformed (-2) when no range survives, matching upstream's
+	// `valid` flag.
+	valid := false
+
 	for _, spec := range specs {
-		spec = strings.TrimSpace(spec)
+		// Locate the dash in the raw spec, as upstream does before trimming.
 		dash := strings.IndexByte(spec, '-')
 		if dash < 0 {
-			return Ranges{}, ResultMalformed
+			// A spec without a dash is skipped, not treated as malformed.
+			continue
 		}
 		startStr := strings.TrimSpace(spec[:dash])
 		endStr := strings.TrimSpace(spec[dash+1:])
 
-		var start, end int64
-		var err error
+		start, startOK := parsePos(startStr)
+		end, endOK := parsePos(endStr)
 
-		if startStr == "" {
-			// suffix range: -N means the last N bytes
-			if endStr == "" {
-				return Ranges{}, ResultMalformed
-			}
-			var suffix int64
-			suffix, err = strconv.ParseInt(endStr, 10, 64)
-			if err != nil {
-				return Ranges{}, ResultMalformed
-			}
-			start = size - suffix
-			end = size - 1
-		} else {
-			start, err = strconv.ParseInt(startStr, 10, 64)
-			if err != nil {
-				return Ranges{}, ResultMalformed
-			}
-			if endStr == "" {
-				end = size - 1
-			} else {
-				end, err = strconv.ParseInt(endStr, 10, 64)
-				if err != nil {
-					return Ranges{}, ResultMalformed
+		if len(startStr) == 0 {
+			// suffix range "-N": last N bytes. start = max(size-N, 0).
+			// Its validity depends on the suffix length being numeric.
+			if endOK {
+				start = size - end
+				if start < 0 {
+					start = 0
 				}
 			}
+			startOK = endOK
+			end = size - 1
+			endOK = true
+		} else if len(endStr) == 0 {
+			// open-ended range "N-": to the end of the resource.
+			end = size - 1
+			endOK = true
 		}
 
-		// Clamp to the resource bounds.
+		// Clamp last-byte-pos to the current length.
 		if end > size-1 {
 			end = size - 1
 		}
-		if start < 0 {
-			start = 0
+
+		// Skip specs with a non-numeric bound.
+		if !startOK || !endOK {
+			continue
 		}
 
-		// Skip nonsensical or entirely out-of-range specs.
-		if start > end || start < 0 {
+		// Skip unsatisfiable ranges, but remember we saw a valid one.
+		if start > end {
+			valid = true
 			continue
 		}
 
@@ -152,8 +149,10 @@ func ParseRanges(size int64, header string, combine bool) (Ranges, int) {
 	}
 
 	if len(out.Ranges) == 0 {
-		// No satisfiable range.
-		return Ranges{Type: unit}, ResultUnsatisfiable
+		if valid {
+			return Ranges{Type: unit}, ResultUnsatisfiable
+		}
+		return Ranges{}, ResultMalformed
 	}
 
 	if combine {
@@ -161,6 +160,25 @@ func ParseRanges(size int64, header string, combine bool) (Ranges, int) {
 	}
 
 	return out, ResultOK
+}
+
+// parsePos parses a byte position, accepting only strings of one or more ASCII
+// digits (matching upstream's /^\d+$/). It returns the value and whether the
+// string was a valid position.
+func parsePos(s string) (int64, bool) {
+	if len(s) == 0 {
+		return 0, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // combineRanges merges overlapping and adjacent ranges while preserving the

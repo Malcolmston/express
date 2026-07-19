@@ -195,8 +195,15 @@ func decodeEntityBody(body string) (rune, bool) {
 		} else {
 			n, err = strconv.ParseInt(body[1:], 10, 32)
 		}
-		if err != nil || n < 0 || n > utf8.MaxRune {
+		if err != nil || n < 0 {
 			return 0, false
+		}
+		// Per the HTML spec (and upstream html-entities), numeric character
+		// references to disallowed code points — the null character, values
+		// beyond the Unicode range, and the UTF-16 surrogate range — resolve to
+		// the replacement character U+FFFD rather than being passed through.
+		if n == 0 || n > utf8.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
+			return '�', true
 		}
 		return rune(n), true
 	}

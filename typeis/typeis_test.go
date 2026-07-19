@@ -10,8 +10,10 @@ func TestIsExact(t *testing.T) {
 }
 
 func TestIsWithParams(t *testing.T) {
+	// Upstream returns the candidate as supplied ("json") for a non-wildcard
+	// match; parameters on the value are stripped before matching.
 	got, ok := Is("application/json; charset=utf-8", "json")
-	if !ok || got != "application/json" {
+	if !ok || got != "json" {
 		t.Fatalf("Is = %q,%v", got, ok)
 	}
 }
@@ -22,10 +24,12 @@ func TestIsShorthand(t *testing.T) {
 		shorthand string
 		want      string
 	}{
-		{"application/json", "json", "application/json"},
-		{"text/html", "html", "text/html"},
-		{"application/x-www-form-urlencoded", "urlencoded", "application/x-www-form-urlencoded"},
-		{"multipart/form-data", "multipart", "multipart/*"},
+		// A non-wildcard candidate is echoed back exactly as supplied
+		// (upstream type-is convention).
+		{"application/json", "json", "json"},
+		{"text/html", "html", "html"},
+		{"application/x-www-form-urlencoded", "urlencoded", "urlencoded"},
+		{"multipart/form-data", "multipart", "multipart"},
 	}
 	for _, c := range cases {
 		got, ok := Is(c.ct, c.shorthand)

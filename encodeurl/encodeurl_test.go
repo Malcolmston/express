@@ -20,7 +20,7 @@ func TestEncode(t *testing.T) {
 		{"unicode encoded", "/€", "/%E2%82%AC"},
 		{"accent encoded", "/café", "/caf%C3%A9"},
 		{"double quote encoded", "/a\"b", "/a%22b"},
-		{"backslash encoded", "/a\\b", "/a%5Cb"},
+		{"backslash preserved", "/a\\b", "/a\\b"},
 		{"hash preserved", "/a#b", "/a#b"},
 		{"dollar preserved", "/a$b", "/a$b"},
 		{"reserved preserved", "/a[b]c", "/a[b]c"},

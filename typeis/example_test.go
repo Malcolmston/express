@@ -6,29 +6,30 @@ import (
 	"github.com/malcolmston/express/typeis"
 )
 
-// ExampleIs tests a concrete Content-Type against a candidate and returns the
-// matched type in its full, normalized form. The candidate "json" is an
-// extension-style shorthand that expands to "application/json" before matching.
-// The parameters on the actual header (here "; charset=utf-8") are stripped
-// during normalization, so they never affect the result. On a match Is returns
-// the expanded pattern and true; on no match it returns "" and false. This is
-// the same convenience Express exposes as req.is.
+// ExampleIs tests a concrete Content-Type against a candidate. The candidate
+// "json" is an extension-style shorthand that expands to "application/json" for
+// matching. The parameters on the actual header (here "; charset=utf-8") are
+// stripped during normalization, so they never affect the result. Following the
+// upstream type-is convention, a matching non-wildcard candidate is returned
+// exactly as supplied (here "json") together with true; on no match Is returns
+// "" and false. This is the same convenience Express exposes as req.is.
 func ExampleIs() {
 	match, ok := typeis.Is("application/json; charset=utf-8", "json")
 	fmt.Println(match, ok)
-	// Output: application/json true
+	// Output: json true
 }
 
 // ExampleIs_multiple tries several candidates in order and reports the first one
 // that matches. Here the value is HTML, so the "json" candidate fails and the
-// "html" candidate matches, returning its expanded form "text/html". Candidates
-// may freely mix shorthands, full types, wildcards, and suffix forms. The first
-// successful match wins and is returned normalized. This makes it easy to branch
-// on the several content types a handler is willing to accept.
+// "html" candidate matches. As with upstream type-is, a matching non-wildcard
+// candidate is echoed back as supplied (here "html"). Candidates may freely mix
+// shorthands, full types, wildcards, and suffix forms; the first successful
+// match wins. This makes it easy to branch on the several content types a
+// handler is willing to accept.
 func ExampleIs_multiple() {
 	match, ok := typeis.Is("text/html", "json", "html")
 	fmt.Println(match, ok)
-	// Output: text/html true
+	// Output: html true
 }
 
 // ExampleMatch compares an already-expanded pattern against a concrete type

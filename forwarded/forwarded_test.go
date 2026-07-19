@@ -70,9 +70,9 @@ func TestForwardedFullIPv6(t *testing.T) {
 	}
 }
 
-func TestForwardedEmptyEntryPreserved(t *testing.T) {
+func TestForwardedBlankEntrySkipped(t *testing.T) {
 	got := Forwarded("127.0.0.1", "10.0.0.1,,10.0.0.2")
-	want := []string{"127.0.0.1", "10.0.0.2", "", "10.0.0.1"}
+	want := []string{"127.0.0.1", "10.0.0.2", "10.0.0.1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

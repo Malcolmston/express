@@ -1,8 +1,8 @@
 // Package dotenv parses .env style configuration content and loads it into the
-// process environment, mirroring the behavior of the npm "dotenv" library. It
-// exposes Parse and Bytes for turning raw .env content into a map of key/value
-// pairs, and Load and LoadOverride for reading a file from disk and applying it
-// to the running process via os.Setenv.
+// process environment, mirroring the behavior of the npm "dotenv" library
+// (motdotla/dotenv). It exposes Parse and Bytes for turning raw .env content
+// into a map of key/value pairs, and Load and LoadOverride for reading a file
+// from disk and applying it to the running process via os.Setenv.
 //
 // The classic use case is keeping configuration out of source code: secrets,
 // connection strings, feature flags, and per-environment tunables live in a
@@ -11,124 +11,118 @@
 // formatted text from some other source (an embedded asset, a network response,
 // a test fixture) and want the parsed values without touching the environment.
 //
-// Parsing is line oriented. Each line is trimmed and then classified: blank
-// lines and lines whose first non-space character is '#' are skipped as comments;
-// a leading "export " (or "export\t") prefix is stripped so shell-sourceable
-// files work; and the remainder is split on the first '=' into a key and a raw
-// value. A line with no '=' or with an empty key is ignored rather than being
-// treated as an error, so malformed lines are simply dropped. The value is then
-// interpreted by its first character.
+// Parsing matches the upstream single regular-expression engine rather than a
+// line scanner, so it handles the same shapes the Node original does. Line
+// endings are first normalized: a lone "\r" and a "\r\n" pair both become "\n".
+// A key is a run of word characters, dots, and dashes; it may carry a leading
+// "export " prefix so shell-sourceable files work, and it is separated from its
+// value by "=" (with optional surrounding spaces) or by ": ". Blank lines and
+// lines whose value region is a "#" comment contribute nothing.
 //
-// Value handling follows dotenv's conventions. A single-quoted value is taken
-// literally up to the closing quote with no escape or variable expansion, so
-// backslashes and dollar signs survive verbatim. A double-quoted value is read
-// up to the closing quote and then has its backslash escapes expanded: \n, \t,
-// \r, \\, and \" become their control-character or literal equivalents, while any
-// other escape keeps the backslash. An unquoted value has any trailing "#"
-// comment removed and is then whitespace-trimmed, so surrounding spaces do not
-// leak in but interior spaces are preserved when quoted. An empty right-hand
-// side yields an empty string, and a value with no closing quote is accepted up
-// to end of line.
+// Value handling follows dotenv's conventions. A value may be single-quoted,
+// double-quoted, or backtick-quoted, and the surrounding quotes are stripped in
+// every case; a quoted value may span multiple physical lines, which makes the
+// captured newlines part of the value (PEM blocks, multi-line strings). Only a
+// double-quoted value has escape sequences expanded: \n and \r become their
+// control characters (and this port additionally honors \t, \\, and \" as a
+// superset that upstream never exercises). Single-quoted and backtick-quoted
+// values are literal, so backslashes and dollar signs survive verbatim. An
+// unquoted value runs up to the first unquoted "#", after which the remainder is
+// treated as a trailing comment, and the value is then whitespace-trimmed. An
+// empty right-hand side yields an empty string.
 //
 // Load and LoadOverride differ only in precedence. Load never overwrites a
 // variable that is already present in the environment, matching dotenv's default
 // of treating the real environment as authoritative; LoadOverride writes every
-// parsed variable unconditionally. Both return any error from opening the file,
-// from the scanner, or from os.Setenv, and a missing file surfaces the
-// underlying os.Open error. Relative to the Node original this port implements
-// the same comment, quote, escape, and export handling, but it does not perform
-// ${VAR} variable interpolation and it does not return dotenv's { parsed, error }
-// result object; it returns an ordinary Go map and error instead.
+// parsed variable unconditionally. Both return any error from opening or reading
+// the file, or from os.Setenv, and a missing file surfaces the underlying
+// os.Open error. Relative to the Node original this port implements the same
+// comment, quote, escape, multi-line, and export handling, but it does not
+// perform ${VAR} variable interpolation (that lives in dotenv-expand upstream
+// too) and it returns an ordinary Go map and error instead of dotenv's
+// { parsed, error } result object.
 package dotenv
 
 import (
-	"bufio"
-	"bytes"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
+// bt is a single backtick, spelled out so the assignment regex below (which
+// itself matches backtick-quoted values) can be written as a Go raw string.
+const bt = "`"
+
+// lineRE mirrors the upstream dotenv LINE regular expression. Each match binds
+// group 1 to the key and group 2 to the raw (still-quoted) value region. The
+// value alternation tries single-, double-, and backtick-quoted forms (each of
+// which may span newlines) before falling back to an unquoted run that stops at
+// the first '#'. Source: motdotla/dotenv lib/main.js.
+var lineRE = regexp.MustCompile(
+	`(?m)^\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)` +
+		`(\s*'(?:\\'|[^'])*'` +
+		`|\s*"(?:\\"|[^"])*"` +
+		`|\s*` + bt + `(?:\\` + bt + `|[^` + bt + `])*` + bt +
+		`|[^#\r\n]+)?\s*(?:#.*)?$`)
+
 // Parse reads .env formatted content from r and returns the parsed key/value
-// pairs. It understands blank lines, full-line and trailing "#" comments,
-// an optional "export " prefix, single-quoted values (kept literally),
-// double-quoted values (with \n and \t escape expansion) and unquoted values
-// (which are trimmed and may carry a trailing comment).
+// pairs. It understands blank lines, full-line and trailing "#" comments, an
+// optional "export " prefix, single-, double-, and backtick-quoted values
+// (including multi-line quoted values), double-quoted escape expansion, and
+// unquoted values (which are trimmed and may carry a trailing comment).
 func Parse(r io.Reader) (map[string]string, error) {
-	out := make(map[string]string)
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		key, val, ok := parseLine(line)
-		if !ok {
-			continue
-		}
-		out[key] = val
-	}
-	if err := scanner.Err(); err != nil {
+	data, err := io.ReadAll(r)
+	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return parseContent(data), nil
 }
 
 // Bytes parses .env formatted content from a byte slice.
 func Bytes(b []byte) (map[string]string, error) {
-	return Parse(bytes.NewReader(b))
+	return parseContent(b), nil
 }
 
-// parseLine parses a single .env line. It returns the key, the resolved value
-// and whether the line held an assignment.
-func parseLine(line string) (string, string, bool) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return "", "", false
+// parseContent runs the upstream regex over the whole (newline-normalized)
+// content and reduces each match to a key/value pair, with later assignments to
+// the same key overwriting earlier ones.
+func parseContent(data []byte) map[string]string {
+	out := make(map[string]string)
+
+	content := string(data)
+	// Normalize line endings the way upstream does: \r\n and lone \r -> \n.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+
+	for _, m := range lineRE.FindAllStringSubmatch(content, -1) {
+		key := m[1]
+		out[key] = parseValue(m[2])
 	}
-	// Strip an optional "export " prefix.
-	if strings.HasPrefix(trimmed, "export ") || strings.HasPrefix(trimmed, "export\t") {
-		trimmed = strings.TrimSpace(trimmed[len("export"):])
-	}
-	eq := strings.IndexByte(trimmed, '=')
-	if eq < 0 {
-		return "", "", false
-	}
-	key := strings.TrimSpace(trimmed[:eq])
-	if key == "" {
-		return "", "", false
-	}
-	raw := strings.TrimSpace(trimmed[eq+1:])
-	return key, parseValue(raw), true
+	return out
 }
 
-// parseValue interprets the right-hand side of an assignment.
+// parseValue resolves the raw value region captured by lineRE: it trims
+// surrounding whitespace, strips one pair of matching surrounding quotes, and
+// (only for double-quoted values) expands backslash escapes.
 func parseValue(raw string) string {
-	if raw == "" {
+	value := strings.TrimSpace(raw)
+	if value == "" {
 		return ""
 	}
-	switch raw[0] {
-	case '\'':
-		// Single-quoted: literal, find the closing quote.
-		if end := strings.IndexByte(raw[1:], '\''); end >= 0 {
-			return raw[1 : 1+end]
-		}
-		return raw[1:]
-	case '"':
-		// Double-quoted: expand escapes, find the closing quote.
-		if end := strings.IndexByte(raw[1:], '"'); end >= 0 {
-			return expandEscapes(raw[1 : 1+end])
-		}
-		return expandEscapes(raw[1:])
-	default:
-		// Unquoted: strip trailing comment, then trim.
-		if hash := strings.IndexByte(raw, '#'); hash >= 0 {
-			raw = raw[:hash]
-		}
-		return strings.TrimSpace(raw)
+	quote := value[0]
+	if len(value) >= 2 && (quote == '\'' || quote == '"' || quote == bt[0]) && value[len(value)-1] == quote {
+		value = value[1 : len(value)-1]
 	}
+	if quote == '"' {
+		value = expandEscapes(value)
+	}
+	return value
 }
 
 // expandEscapes expands the backslash escapes that dotenv honors inside
-// double-quoted values.
+// double-quoted values. Upstream expands \n and \r; this port also honors \t,
+// \\, and \" as a superset, which none of upstream's fixtures exercise.
 func expandEscapes(s string) string {
 	if !strings.ContainsRune(s, '\\') {
 		return s
