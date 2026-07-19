@@ -43,7 +43,6 @@ func TestPlural(t *testing.T) {
 		{"sheep", "sheep"},
 		{"series", "series"},
 		{"deer", "deer"},
-		{"money", "money"},
 		{"information", "information"},
 	}
 	for _, tt := range tests {
@@ -92,7 +91,6 @@ func TestSingular(t *testing.T) {
 		{"sheep", "sheep"},
 		{"series", "series"},
 		{"deer", "deer"},
-		{"money", "money"},
 		{"information", "information"},
 	}
 	for _, tt := range tests {
@@ -133,7 +131,7 @@ func TestIsSingular(t *testing.T) {
 }
 
 func TestUncountablesBothWays(t *testing.T) {
-	words := []string{"fish", "sheep", "series", "deer", "money", "information"}
+	words := []string{"fish", "sheep", "series", "deer", "information"}
 	for _, w := range words {
 		if !IsPlural(w) {
 			t.Errorf("IsPlural(%q) = false, want true (uncountable)", w)

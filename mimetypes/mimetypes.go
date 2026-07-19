@@ -44,7 +44,6 @@
 package mimetypes
 
 import (
-	"path"
 	"strings"
 )
 
@@ -54,8 +53,8 @@ var typeByExt = map[string]string{
 	"htm":      "text/html",
 	"shtml":    "text/html",
 	"css":      "text/css",
-	"js":       "application/javascript",
-	"mjs":      "application/javascript",
+	"js":       "text/javascript",
+	"mjs":      "text/javascript",
 	"json":     "application/json",
 	"map":      "application/json",
 	"xml":      "application/xml",
@@ -169,26 +168,40 @@ var extByType = map[string]string{
 	"application/rtf":               "rtf",
 }
 
-// normalizeExt extracts the lower-case extension (no dot) from a path,
-// filename, bare extension, or ".ext".
-func normalizeExt(pathOrExt string) string {
-	s := strings.ToLower(strings.TrimSpace(pathOrExt))
-	if s == "" {
+// nodeExtname returns the extension (including the leading dot) of the final
+// path segment, mirroring Node.js path.extname: a leading-dot "dotfile" whose
+// only dot is the first character of the base name has no extension. Unlike
+// the standard library path.Ext, which reports ".json" for a base name like
+// ".json", this treats such dotfiles as extension-less. Only "/" is treated as
+// a separator, matching Node's behavior on POSIX (upstream mime-types relies on
+// this, so "C:\\path\\to\\page.html" resolves via the final dot).
+func nodeExtname(p string) string {
+	base := p
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		base = p[i+1:]
+	}
+	dot := strings.LastIndexByte(base, '.')
+	// dot == -1: no dot; dot == 0: leading-dot dotfile. Both have no extension.
+	if dot <= 0 {
 		return ""
 	}
-	// If it contains a path separator or a dot, treat it as a path/filename.
-	if strings.ContainsAny(s, "/\\.") {
-		ext := path.Ext(strings.ReplaceAll(s, "\\", "/"))
-		if ext != "" {
-			return strings.TrimPrefix(ext, ".")
-		}
-		// No dot-extension found; fall through treating whole thing as ext
-		// only if it has no separators.
-		if strings.ContainsAny(s, "/\\") {
-			return ""
-		}
+	return base[dot:]
+}
+
+// normalizeExt extracts the lower-case extension (no dot) from a path,
+// filename, bare extension, or ".ext". It follows upstream mime-types, which
+// resolves the extension via extname("x." + input): prefixing "x." makes bare
+// extensions and ".ext" inputs resolve like a file name, while path-embedded
+// dotfiles such as "/path/to/.json" correctly yield no extension.
+func normalizeExt(pathOrExt string) string {
+	if pathOrExt == "" {
+		return ""
 	}
-	return s
+	ext := nodeExtname("x." + pathOrExt)
+	if ext == "" {
+		return ""
+	}
+	return strings.ToLower(ext[1:])
 }
 
 // Lookup returns the MIME type for a filename, path, or extension. The
@@ -204,22 +217,24 @@ func Lookup(pathOrExt string) (string, bool) {
 }
 
 // Charset returns the charset for a MIME type, or false if none applies.
-// text/* types and JSON, XML and JavaScript types use "utf-8".
+// text/* types and JSON, XML and JavaScript types use "UTF-8". The value is
+// returned in the canonical upstream casing ("UTF-8"); ContentType lower-cases
+// it when building a header value.
 func Charset(mimeType string) (string, bool) {
 	t := strings.ToLower(strings.TrimSpace(mimeType))
 	if i := strings.IndexByte(t, ';'); i >= 0 {
 		t = strings.TrimSpace(t[:i])
 	}
 	if strings.HasPrefix(t, "text/") {
-		return "utf-8", true
+		return "UTF-8", true
 	}
 	switch t {
 	case "application/json", "application/javascript", "text/javascript",
 		"application/xml", "application/ld+json", "application/manifest+json":
-		return "utf-8", true
+		return "UTF-8", true
 	}
 	if strings.HasSuffix(t, "+json") || strings.HasSuffix(t, "+xml") {
-		return "utf-8", true
+		return "UTF-8", true
 	}
 	return "", false
 }
@@ -247,7 +262,7 @@ func ContentType(typeOrExt string) (string, bool) {
 		return mime, true
 	}
 	if cs, ok := Charset(mime); ok {
-		return mime + "; charset=" + cs, true
+		return mime + "; charset=" + strings.ToLower(cs), true
 	}
 	return mime, true
 }

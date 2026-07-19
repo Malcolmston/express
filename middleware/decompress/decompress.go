@@ -54,8 +54,11 @@ type gzipBody struct {
 	orig io.ReadCloser
 }
 
+// Read implements io.Reader; it reads decompressed data from the gzip reader.
 func (b *gzipBody) Read(p []byte) (int, error) { return b.gz.Read(p) }
 
+// Close implements io.Closer; it closes the gzip reader and the underlying
+// body, returning the first error encountered.
 func (b *gzipBody) Close() error {
 	err := b.gz.Close()
 	if cerr := b.orig.Close(); err == nil {

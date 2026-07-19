@@ -91,6 +91,8 @@ type statusWriter struct {
 	wrote  bool
 }
 
+// WriteHeader implements http.ResponseWriter; it records the first status code
+// written before delegating to the wrapped ResponseWriter.
 func (w *statusWriter) WriteHeader(code int) {
 	if !w.wrote {
 		w.status = code
@@ -99,6 +101,8 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Write implements http.ResponseWriter; it records an implicit 200 status on
+// the first write and delegates to the wrapped ResponseWriter.
 func (w *statusWriter) Write(b []byte) (int, error) {
 	if !w.wrote {
 		w.status = http.StatusOK

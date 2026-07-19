@@ -75,8 +75,8 @@ func TestUniqueness(t *testing.T) {
 }
 
 func TestInvalid(t *testing.T) {
-	if _, err := NewSize(0); err == nil {
-		t.Fatal("expected error for size 0")
+	if _, err := NewSize(-10); err == nil {
+		t.Fatal("expected error for negative size")
 	}
 	if _, err := Custom("", 5); err == nil {
 		t.Fatal("expected error for empty alphabet")

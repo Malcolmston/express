@@ -117,6 +117,8 @@ type recorder struct {
 	wroteHeader bool
 }
 
+// WriteHeader implements http.ResponseWriter; it records the first status code
+// written before delegating to the wrapped ResponseWriter.
 func (r *recorder) WriteHeader(code int) {
 	if !r.wroteHeader {
 		r.status = code
@@ -125,6 +127,8 @@ func (r *recorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Write implements http.ResponseWriter; it delegates to the wrapped
+// ResponseWriter and accumulates the number of bytes written.
 func (r *recorder) Write(p []byte) (int, error) {
 	n, err := r.ResponseWriter.Write(p)
 	r.bytes += n

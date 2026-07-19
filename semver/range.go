@@ -2,9 +2,21 @@ package semver
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// semOpSpaceRe matches whitespace directly following a range operator or a
+// caret/tilde, so it can be removed (node-semver's comparatorTrimReplace). This
+// lets "> 1.0.0", "^ 1", "~ 1.0" tokenize as single comparators.
+var semOpSpaceRe = regexp.MustCompile(`(>=|<=|\^|~|>|<|=)\s+`)
+
+// semNormalizeRange collapses "~>" to "~" and strips whitespace after operators.
+func semNormalizeRange(s string) string {
+	s = strings.ReplaceAll(s, "~>", "~")
+	return semOpSpaceRe.ReplaceAllString(s, "$1")
+}
 
 // operator is a single version comparator.
 type semOp int
@@ -165,6 +177,7 @@ func MinSatisfying(versions []string, constraint string) (string, bool) {
 // --- range parsing ----------------------------------------------------------
 
 func semParseComparatorSet(s string) ([]semComparator, error) {
+	s = semNormalizeRange(strings.TrimSpace(s))
 	if s == "" {
 		// empty string means "any version"
 		return []semComparator{{op: semGTE, v: &Version{}}}, nil
@@ -197,7 +210,9 @@ func semParseHyphen(lo, hi string) ([]semComparator, error) {
 	set := []semComparator{{op: semGTE, v: lv}}
 	// upper bound
 	hp := semSplitPartial(hi)
-	if hp.minorX {
+	if hp.majorX {
+		// hyphen upper bound of "x" imposes no upper limit.
+	} else if hp.minorX {
 		set = append(set, semComparator{op: semLT, v: &Version{Major: hp.major + 1}})
 	} else if hp.patchX {
 		set = append(set, semComparator{op: semLT, v: &Version{Major: hp.major, Minor: hp.minor + 1}})
@@ -208,9 +223,9 @@ func semParseHyphen(lo, hi string) ([]semComparator, error) {
 }
 
 type semPartial struct {
-	major, minor, patch uint64
-	minorX, patchX      bool
-	pre                 []string
+	major, minor, patch    uint64
+	majorX, minorX, patchX bool
+	pre                    []string
 }
 
 func semSplitPartial(s string) semPartial {
@@ -243,6 +258,7 @@ func semSplitPartial(s string) semPartial {
 	var xr bool
 	p.major, xr = get(0)
 	if xr {
+		p.majorX = true
 		p.minorX = true
 		p.patchX = true
 		return p
@@ -288,37 +304,88 @@ func semParseSingle(f string) ([]semComparator, error) {
 func semParseOpVersion(opStr, rest string) ([]semComparator, error) {
 	op := map[string]semOp{">=": semGTE, "<=": semLTE, ">": semGT, "<": semLT, "=": semEQ}[opStr]
 	p := semSplitPartial(rest)
-	v := &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}
-	// For partial versions with operators, npm expands but we approximate with
-	// the floored version, which is correct for the common concrete cases.
-	return []semComparator{{op: op, v: v}}, nil
-}
+	anyX := p.majorX || p.minorX || p.patchX
 
-func semParseXRange(f string) ([]semComparator, error) {
-	if f == "" || f == "*" || f == "x" || f == "X" {
+	// An operator applied to a partial ("x-range") version expands per
+	// node-semver's replaceXRange, e.g. ">1" -> ">=2.0.0", "<=0.7.x" -> "<0.8.0",
+	// "=0.7.x" -> ">=0.7.0 <0.8.0". A fully specified version keeps the operator.
+	if !anyX {
+		v := &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}
+		return []semComparator{{op: op, v: v}}, nil
+	}
+
+	// "=" with any wildcard degrades to a plain x-range.
+	if op == semEQ {
+		return semXRangeSet(p), nil
+	}
+
+	if p.majorX {
+		// ">X"/"<X" match nothing; ">=X"/"<=X" match anything.
+		if op == semGT || op == semLT {
+			return []semComparator{{op: semLT, v: &Version{}}}, nil
+		}
 		return []semComparator{{op: semGTE, v: &Version{}}}, nil
 	}
-	p := semSplitPartial(f)
+
+	// minor or patch is a wildcard.
+	switch op {
+	case semGT:
+		// >1 => >=2.0.0 ; >1.2 => >=1.3.0
+		if p.minorX {
+			return []semComparator{{op: semGTE, v: &Version{Major: p.major + 1}}}, nil
+		}
+		return []semComparator{{op: semGTE, v: &Version{Major: p.major, Minor: p.minor + 1}}}, nil
+	case semLTE:
+		// <=1 => <2.0.0 ; <=1.2 => <1.3.0
+		if p.minorX {
+			return []semComparator{{op: semLT, v: &Version{Major: p.major + 1}}}, nil
+		}
+		return []semComparator{{op: semLT, v: &Version{Major: p.major, Minor: p.minor + 1}}}, nil
+	case semLT:
+		// <1 => <1.0.0 ; <1.2 => <1.2.0
+		return []semComparator{{op: semLT, v: &Version{Major: p.major, Minor: p.minor}}}, nil
+	default: // semGTE
+		// >=1 => >=1.0.0 ; >=1.2 => >=1.2.0
+		return []semComparator{{op: semGTE, v: &Version{Major: p.major, Minor: p.minor}}}, nil
+	}
+}
+
+// semXRangeSet expands a partial ("x-range") version into comparators.
+func semXRangeSet(p semPartial) []semComparator {
+	if p.majorX {
+		return []semComparator{{op: semGTE, v: &Version{}}}
+	}
 	if p.minorX {
-		// e.g. "1" or "1.x" -> >=1.0.0 <2.0.0 ; but "*" handled above
+		// e.g. "1" or "1.x" -> >=1.0.0 <2.0.0
 		return []semComparator{
 			{op: semGTE, v: &Version{Major: p.major}},
 			{op: semLT, v: &Version{Major: p.major + 1}},
-		}, nil
+		}
 	}
 	if p.patchX {
 		// e.g. "1.2" or "1.2.x" -> >=1.2.0 <1.3.0
 		return []semComparator{
 			{op: semGTE, v: &Version{Major: p.major, Minor: p.minor}},
 			{op: semLT, v: &Version{Major: p.major, Minor: p.minor + 1}},
-		}, nil
+		}
 	}
 	// fully specified: exact match
-	return []semComparator{{op: semEQ, v: &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}}}, nil
+	return []semComparator{{op: semEQ, v: &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}}}
+}
+
+func semParseXRange(f string) ([]semComparator, error) {
+	if f == "" || f == "*" || f == "x" || f == "X" {
+		return []semComparator{{op: semGTE, v: &Version{}}}, nil
+	}
+	return semXRangeSet(semSplitPartial(f)), nil
 }
 
 func semParseCaret(rest string) ([]semComparator, error) {
 	p := semSplitPartial(rest)
+	if p.majorX {
+		// "^x"/"^*" impose no constraint.
+		return []semComparator{{op: semGTE, v: &Version{}}}, nil
+	}
 	lo := &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}
 	var hi *Version
 	switch {
@@ -334,6 +401,10 @@ func semParseCaret(rest string) ([]semComparator, error) {
 
 func semParseTilde(rest string) ([]semComparator, error) {
 	p := semSplitPartial(rest)
+	if p.majorX {
+		// "~x"/"~*" impose no constraint.
+		return []semComparator{{op: semGTE, v: &Version{}}}, nil
+	}
 	lo := &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}
 	var hi *Version
 	if p.minorX {

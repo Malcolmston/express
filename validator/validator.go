@@ -109,12 +109,32 @@ func (f *FieldRules) Email() *FieldRules {
 		if !present {
 			return ""
 		}
-		if !emailRe.MatchString(toString(v)) {
+		if !validEmail(toString(v)) {
 			return "must be a valid email address"
 		}
 		return ""
 	})
 	return f
+}
+
+// validEmail applies a pragmatic email syntax check: a local part, a single
+// "@", and a dotted domain, additionally rejecting a leading, trailing, or
+// consecutive dot in either the local part or the domain. The dot rule mirrors
+// validator.js's isEmail, which splits both halves on "." and requires every
+// label to be non-empty, so "a..b@x.com", "a.@x.com", and "a@b.com." are all
+// invalid.
+func validEmail(s string) bool {
+	if !emailRe.MatchString(s) {
+		return false
+	}
+	at := strings.LastIndex(s, "@")
+	return validDotLabels(s[:at]) && validDotLabels(s[at+1:])
+}
+
+// validDotLabels reports whether s has no empty dot-separated label, i.e. no
+// leading dot, trailing dot, or "" between two dots.
+func validDotLabels(s string) bool {
+	return !strings.HasPrefix(s, ".") && !strings.HasSuffix(s, ".") && !strings.Contains(s, "..")
 }
 
 // MinLen requires the string value to be at least n characters.

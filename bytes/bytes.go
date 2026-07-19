@@ -106,6 +106,10 @@ type FormatOptions struct {
 	FixedDecimals bool
 	// UnitSeparator is placed between the number and the unit (default "").
 	UnitSeparator string
+	// ThousandsSeparator is inserted between every group of three digits in
+	// the integer part of the number (e.g. " " renders 1000 bytes as
+	// "1 000B"). Empty means no grouping.
+	ThousandsSeparator string
 	// Unit forces a specific unit (e.g. "MB"). If empty the largest fitting
 	// unit is chosen.
 	Unit string
@@ -158,7 +162,40 @@ func FormatOpts(n int64, opts FormatOptions) string {
 	if !opts.FixedDecimals {
 		str = trimZeros(str)
 	}
+	if opts.ThousandsSeparator != "" {
+		intPart, fracPart, hasFrac := strings.Cut(str, ".")
+		str = groupThousands(intPart, opts.ThousandsSeparator)
+		if hasFrac {
+			str += "." + fracPart
+		}
+	}
 	return str + opts.UnitSeparator + unit
+}
+
+// groupThousands inserts sep between every group of three digits in the
+// integer string s, counting from the right, leaving any leading sign in
+// place. It mirrors the npm bytes package's thousandsSeparator behavior
+// (regexp /\B(?=(\d{3})+(?!\d))/g applied to the integer part).
+func groupThousands(s, sep string) string {
+	sign := ""
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+		sign, s = s[:1], s[1:]
+	}
+	n := len(s)
+	if n <= 3 {
+		return sign + s
+	}
+	first := n % 3
+	if first == 0 {
+		first = 3
+	}
+	var b strings.Builder
+	b.WriteString(s[:first])
+	for i := first; i < n; i += 3 {
+		b.WriteString(sep)
+		b.WriteString(s[i : i+3])
+	}
+	return sign + b.String()
 }
 
 // trimZeros removes trailing fractional zeros (and a dangling decimal point)

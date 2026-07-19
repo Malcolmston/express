@@ -1,40 +1,29 @@
 // Package slugify converts strings into URL-safe slugs, mirroring the behavior
-// of the npm "slugify" library. A slug is the lower-friction, path-safe form of
-// a title used in URLs, filenames, and anchor identifiers, for example turning
-// "Crème brûlée" into "creme-brulee". The goal is a deterministic, readable
-// ASCII string that survives copy-pasting and routing unchanged.
+// of the npm "slugify" library (simov/slugify). A slug is the lower-friction,
+// path-safe form of a title used in URLs, filenames, and anchor identifiers,
+// for example turning "Crème brûlée" into "creme-brulee". The goal is a
+// deterministic, readable ASCII string that survives copy-pasting and routing
+// unchanged.
 //
-// The transformation runs in a few stages. First each input rune is looked up
-// in charMap, a transliteration table that maps common accented Latin letters
-// and a handful of symbols to ASCII equivalents (for example 'é' to "e", 'ß'
-// to "ss", and '&' to "and"). Runes without a mapping are passed through as-is.
-// After mapping, any character that is neither a word character nor whitespace
-// is removed, whitespace runs are collapsed into the separator, and consecutive
-// separators are merged so the result never contains a doubled separator.
+// The transformation runs in a few stages, matching the reference
+// implementation. Each input rune is looked up in charMap, a transliteration
+// table that maps accented Latin letters, Greek, Cyrillic, Turkish, Armenian,
+// Arabic, Georgian, Vietnamese, currency, and symbol characters to ASCII
+// equivalents (for example 'é' to "e", 'ß' to "ss", '&' to "and", and '©' to
+// "(c)"). A rune with no mapping is passed through as-is. If a mapped result
+// equals the separator it is turned into a space so separator runs collapse.
+// After mapping, each appended fragment has any character that is not in the
+// allowed set removed (the default keeps word characters, whitespace, and the
+// punctuation $*_+~.()'"!-:@). Then, optionally, strict filtering drops every
+// non-alphanumeric, non-space character; whitespace is trimmed; whitespace runs
+// are replaced by the separator; and the result is optionally lowercased.
 //
 // Behavior is tuned through Options. Separator sets the string that replaces
 // whitespace runs and defaults to "-". Lower lowercases the final slug; like
-// the npm library, slugify does not lowercase by default, so callers who want
-// lowercase slugs must ask for it. Strict removes every character that is not
-// alphanumeric or whitespace before separators are inserted, which drops
-// characters such as underscores that are otherwise treated as word
-// characters. Trim removes leading and trailing whitespace before the
-// separator join so the slug has no leading or trailing separator.
-//
-// The zero Options value is not identical to the convenience default. When
-// Slugify is called with no Options argument it enables Trim, matching what
-// most callers expect; when an explicit Options value is passed it is honored
-// verbatim except that an empty Separator falls back to "-". This mirrors the
-// npm defaults, where trimming is on but lowercasing is off, while still giving
-// full control to callers who construct Options directly.
-//
-// Parity with the Node library is close for the common Latin-1 and symbol
-// cases but not exhaustive. The character map here covers frequently used
-// accented letters, ligatures, and symbols rather than the full multi-hundred
-// entry table shipped by the npm package, so exotic scripts and less common
-// symbols may pass through or be removed instead of transliterated. The
-// separator collapsing, trimming, strict filtering, and optional lowercasing
-// follow the same rules as the reference implementation.
+// the npm library, slugify does not lowercase by default. Strict removes every
+// character that is not alphanumeric or whitespace. Trim removes leading and
+// trailing whitespace before the separator join. Remove overrides the default
+// removal pattern.
 package slugify
 
 import (
@@ -49,44 +38,195 @@ type Options struct {
 	// Lower lowercases the resulting slug. npm slugify does not lowercase by
 	// default.
 	Lower bool
-	// Separator replaces whitespace runs. Defaults to "-".
+	// Separator replaces whitespace runs. Defaults to "-". An empty value falls
+	// back to "-" (the no-argument default and zero value both mean "-").
 	Separator string
 	// Strict removes every character that is not alphanumeric or whitespace
-	// (before whitespace is turned into separators).
+	// (after transliteration, before whitespace is turned into separators).
 	Strict bool
 	// Trim trims leading and trailing whitespace before joining. Defaults to
 	// true when using the no-Options form of Slugify.
 	Trim bool
+	// Remove, when non-nil, overrides the default pattern of characters removed
+	// after transliteration. It mirrors npm slugify's options.remove.
+	Remove *regexp.Regexp
 }
 
 var (
-	removeRe = regexp.MustCompile(`[^\w\s]`)
+	// removeRe is the default removal pattern. It matches every run of
+	// characters that is NOT a word character, whitespace, or one of the
+	// punctuation marks $*_+~.()'"!-:@ , mirroring the npm default
+	// /[^\w\s$*_+~.()'"!\-:@]+/g.
+	removeRe = regexp.MustCompile(`[^\w\s$*_+~.()'"!\-:@]+`)
 	strictRe = regexp.MustCompile(`[^A-Za-z0-9\s]`)
 	spaceRe  = regexp.MustCompile(`\s+`)
 )
 
-// charMap transliterates common accented Latin characters and a handful of
-// symbols to ASCII equivalents.
+// charMap transliterates Unicode characters to ASCII equivalents. It is a
+// verbatim copy of the npm slugify charmap
+// (https://raw.githubusercontent.com/simov/slugify/master/config/charmap.json).
 var charMap = map[rune]string{
-	'À': "A", 'Á': "A", 'Â': "A", 'Ã': "A", 'Ä': "A", 'Å': "A", 'Æ': "AE",
-	'Ç': "C", 'È': "E", 'É': "E", 'Ê': "E", 'Ë': "E",
-	'Ì': "I", 'Í': "I", 'Î': "I", 'Ï': "I",
-	'Ð': "D", 'Ñ': "N",
-	'Ò': "O", 'Ó': "O", 'Ô': "O", 'Õ': "O", 'Ö': "O", 'Ø': "O",
-	'Ù': "U", 'Ú': "U", 'Û': "U", 'Ü': "U",
-	'Ý': "Y", 'Þ': "TH", 'ß': "ss",
-	'à': "a", 'á': "a", 'â': "a", 'ã': "a", 'ä': "a", 'å': "a", 'æ': "ae",
-	'ç': "c", 'è': "e", 'é': "e", 'ê': "e", 'ë': "e",
-	'ì': "i", 'í': "i", 'î': "i", 'ï': "i",
-	'ð': "d", 'ñ': "n",
-	'ò': "o", 'ó': "o", 'ô': "o", 'õ': "o", 'ö': "o", 'ø': "o",
-	'ù': "u", 'ú': "u", 'û': "u", 'ü': "u",
-	'ý': "y", 'þ': "th", 'ÿ': "y",
-	'œ': "oe", 'Œ': "OE",
-	// Symbol replacements.
-	'&': "and", '@': "at", '#': "number", '%': "percent",
-	'<': "less", '>': "greater", '|': "or", '$': "dollar",
-	'€': "euro", '£': "pound", '©': "c", '®': "r",
+	'$': "dollar", '%': "percent", '&': "and", '<': "less",
+	'>': "greater", '|': "or", '¢': "cent", '£': "pound",
+	'¤': "currency", '¥': "yen", '©': "(c)", 'ª': "a",
+	'®': "(r)", 'º': "o", 'À': "A", 'Á': "A",
+	'Â': "A", 'Ã': "A", 'Ä': "A", 'Å': "A",
+	'Æ': "AE", 'Ç': "C", 'È': "E", 'É': "E",
+	'Ê': "E", 'Ë': "E", 'Ì': "I", 'Í': "I",
+	'Î': "I", 'Ï': "I", 'Ð': "D", 'Ñ': "N",
+	'Ò': "O", 'Ó': "O", 'Ô': "O", 'Õ': "O",
+	'Ö': "O", 'Ø': "O", 'Ù': "U", 'Ú': "U",
+	'Û': "U", 'Ü': "U", 'Ý': "Y", 'Þ': "TH",
+	'ß': "ss", 'à': "a", 'á': "a", 'â': "a",
+	'ã': "a", 'ä': "a", 'å': "a", 'æ': "ae",
+	'ç': "c", 'è': "e", 'é': "e", 'ê': "e",
+	'ë': "e", 'ì': "i", 'í': "i", 'î': "i",
+	'ï': "i", 'ð': "d", 'ñ': "n", 'ò': "o",
+	'ó': "o", 'ô': "o", 'õ': "o", 'ö': "o",
+	'ø': "o", 'ù': "u", 'ú': "u", 'û': "u",
+	'ü': "u", 'ý': "y", 'þ': "th", 'ÿ': "y",
+	'Ā': "A", 'ā': "a", 'Ă': "A", 'ă': "a",
+	'Ą': "A", 'ą': "a", 'Ć': "C", 'ć': "c",
+	'Č': "C", 'č': "c", 'Ď': "D", 'ď': "d",
+	'Đ': "DJ", 'đ': "dj", 'Ē': "E", 'ē': "e",
+	'Ė': "E", 'ė': "e", 'Ę': "E", 'ę': "e",
+	'Ě': "E", 'ě': "e", 'Ğ': "G", 'ğ': "g",
+	'Ģ': "G", 'ģ': "g", 'Ĩ': "I", 'ĩ': "i",
+	'Ī': "I", 'ī': "i", 'Į': "I", 'į': "i",
+	'İ': "I", 'ı': "i", 'Ķ': "K", 'ķ': "k",
+	'Ļ': "L", 'ļ': "l", 'Ľ': "L", 'ľ': "l",
+	'Ł': "L", 'ł': "l", 'Ń': "N", 'ń': "n",
+	'Ņ': "N", 'ņ': "n", 'Ň': "N", 'ň': "n",
+	'Ō': "O", 'ō': "o", 'Ő': "O", 'ő': "o",
+	'Œ': "OE", 'œ': "oe", 'Ŕ': "R", 'ŕ': "r",
+	'Ř': "R", 'ř': "r", 'Ś': "S", 'ś': "s",
+	'Ş': "S", 'ş': "s", 'Š': "S", 'š': "s",
+	'Ţ': "T", 'ţ': "t", 'Ť': "T", 'ť': "t",
+	'Ũ': "U", 'ũ': "u", 'Ū': "U", 'ū': "u",
+	'Ů': "U", 'ů': "u", 'Ű': "U", 'ű': "u",
+	'Ų': "U", 'ų': "u", 'Ŵ': "W", 'ŵ': "w",
+	'Ŷ': "Y", 'ŷ': "y", 'Ÿ': "Y", 'Ź': "Z",
+	'ź': "z", 'Ż': "Z", 'ż': "z", 'Ž': "Z",
+	'ž': "z", 'Ə': "E", 'ƒ': "f", 'Ơ': "O",
+	'ơ': "o", 'Ư': "U", 'ư': "u", 'ǈ': "LJ",
+	'ǉ': "lj", 'ǋ': "NJ", 'ǌ': "nj", 'Ș': "S",
+	'ș': "s", 'Ț': "T", 'ț': "t", 'ə': "e",
+	'˚': "o", 'Ά': "A", 'Έ': "E", 'Ή': "H",
+	'Ί': "I", 'Ό': "O", 'Ύ': "Y", 'Ώ': "W",
+	'ΐ': "i", 'Α': "A", 'Β': "B", 'Γ': "G",
+	'Δ': "D", 'Ε': "E", 'Ζ': "Z", 'Η': "H",
+	'Θ': "8", 'Ι': "I", 'Κ': "K", 'Λ': "L",
+	'Μ': "M", 'Ν': "N", 'Ξ': "3", 'Ο': "O",
+	'Π': "P", 'Ρ': "R", 'Σ': "S", 'Τ': "T",
+	'Υ': "Y", 'Φ': "F", 'Χ': "X", 'Ψ': "PS",
+	'Ω': "W", 'Ϊ': "I", 'Ϋ': "Y", 'ά': "a",
+	'έ': "e", 'ή': "h", 'ί': "i", 'ΰ': "y",
+	'α': "a", 'β': "b", 'γ': "g", 'δ': "d",
+	'ε': "e", 'ζ': "z", 'η': "h", 'θ': "8",
+	'ι': "i", 'κ': "k", 'λ': "l", 'μ': "m",
+	'ν': "n", 'ξ': "3", 'ο': "o", 'π': "p",
+	'ρ': "r", 'ς': "s", 'σ': "s", 'τ': "t",
+	'υ': "y", 'φ': "f", 'χ': "x", 'ψ': "ps",
+	'ω': "w", 'ϊ': "i", 'ϋ': "y", 'ό': "o",
+	'ύ': "y", 'ώ': "w", 'Ё': "Yo", 'Ђ': "DJ",
+	'Є': "Ye", 'І': "I", 'Ї': "Yi", 'Ј': "J",
+	'Љ': "LJ", 'Њ': "NJ", 'Ћ': "C", 'Џ': "DZ",
+	'А': "A", 'Б': "B", 'В': "V", 'Г': "G",
+	'Д': "D", 'Е': "E", 'Ж': "Zh", 'З': "Z",
+	'И': "I", 'Й': "J", 'К': "K", 'Л': "L",
+	'М': "M", 'Н': "N", 'О': "O", 'П': "P",
+	'Р': "R", 'С': "S", 'Т': "T", 'У': "U",
+	'Ф': "F", 'Х': "H", 'Ц': "C", 'Ч': "Ch",
+	'Ш': "Sh", 'Щ': "Sh", 'Ъ': "U", 'Ы': "Y",
+	'Ь': "", 'Э': "E", 'Ю': "Yu", 'Я': "Ya",
+	'а': "a", 'б': "b", 'в': "v", 'г': "g",
+	'д': "d", 'е': "e", 'ж': "zh", 'з': "z",
+	'и': "i", 'й': "j", 'к': "k", 'л': "l",
+	'м': "m", 'н': "n", 'о': "o", 'п': "p",
+	'р': "r", 'с': "s", 'т': "t", 'у': "u",
+	'ф': "f", 'х': "h", 'ц': "c", 'ч': "ch",
+	'ш': "sh", 'щ': "sh", 'ъ': "u", 'ы': "y",
+	'ь': "", 'э': "e", 'ю': "yu", 'я': "ya",
+	'ё': "yo", 'ђ': "dj", 'є': "ye", 'і': "i",
+	'ї': "yi", 'ј': "j", 'љ': "lj", 'њ': "nj",
+	'ћ': "c", 'ѝ': "u", 'џ': "dz", 'Ґ': "G",
+	'ґ': "g", 'Ғ': "GH", 'ғ': "gh", 'Қ': "KH",
+	'қ': "kh", 'Ң': "NG", 'ң': "ng", 'Ү': "UE",
+	'ү': "ue", 'Ұ': "U", 'ұ': "u", 'Һ': "H",
+	'һ': "h", 'Ә': "AE", 'ә': "ae", 'Ө': "OE",
+	'ө': "oe", 'Ա': "A", 'Բ': "B", 'Գ': "G",
+	'Դ': "D", 'Ե': "E", 'Զ': "Z", 'Է': "E'",
+	'Ը': "Y'", 'Թ': "T'", 'Ժ': "JH", 'Ի': "I",
+	'Լ': "L", 'Խ': "X", 'Ծ': "C'", 'Կ': "K",
+	'Հ': "H", 'Ձ': "D'", 'Ղ': "GH", 'Ճ': "TW",
+	'Մ': "M", 'Յ': "Y", 'Ն': "N", 'Շ': "SH",
+	'Չ': "CH", 'Պ': "P", 'Ջ': "J", 'Ռ': "R'",
+	'Ս': "S", 'Վ': "V", 'Տ': "T", 'Ր': "R",
+	'Ց': "C", 'Փ': "P'", 'Ք': "Q'", 'Օ': "O''",
+	'Ֆ': "F", 'և': "EV", 'ء': "a", 'آ': "aa",
+	'أ': "a", 'ؤ': "u", 'إ': "i", 'ئ': "e",
+	'ا': "a", 'ب': "b", 'ة': "h", 'ت': "t",
+	'ث': "th", 'ج': "j", 'ح': "h", 'خ': "kh",
+	'د': "d", 'ذ': "th", 'ر': "r", 'ز': "z",
+	'س': "s", 'ش': "sh", 'ص': "s", 'ض': "dh",
+	'ط': "t", 'ظ': "z", 'ع': "a", 'غ': "gh",
+	'ف': "f", 'ق': "q", 'ك': "k", 'ل': "l",
+	'م': "m", 'ن': "n", 'ه': "h", 'و': "w",
+	'ى': "a", 'ي': "y", 'ً': "an", 'ٌ': "on",
+	'ٍ': "en", 'َ': "a", 'ُ': "u", 'ِ': "e",
+	'ْ': "", '٠': "0", '١': "1", '٢': "2",
+	'٣': "3", '٤': "4", '٥': "5", '٦': "6",
+	'٧': "7", '٨': "8", '٩': "9", 'پ': "p",
+	'چ': "ch", 'ژ': "zh", 'ک': "k", 'گ': "g",
+	'ی': "y", '۰': "0", '۱': "1", '۲': "2",
+	'۳': "3", '۴': "4", '۵': "5", '۶': "6",
+	'۷': "7", '۸': "8", '۹': "9", '฿': "baht",
+	'ა': "a", 'ბ': "b", 'გ': "g", 'დ': "d",
+	'ე': "e", 'ვ': "v", 'ზ': "z", 'თ': "t",
+	'ი': "i", 'კ': "k", 'ლ': "l", 'მ': "m",
+	'ნ': "n", 'ო': "o", 'პ': "p", 'ჟ': "zh",
+	'რ': "r", 'ს': "s", 'ტ': "t", 'უ': "u",
+	'ფ': "f", 'ქ': "k", 'ღ': "gh", 'ყ': "q",
+	'შ': "sh", 'ჩ': "ch", 'ც': "ts", 'ძ': "dz",
+	'წ': "ts", 'ჭ': "ch", 'ხ': "kh", 'ჯ': "j",
+	'ჰ': "h", 'Ṣ': "S", 'ṣ': "s", 'Ẁ': "W",
+	'ẁ': "w", 'Ẃ': "W", 'ẃ': "w", 'Ẅ': "W",
+	'ẅ': "w", 'ẞ': "SS", 'Ạ': "A", 'ạ': "a",
+	'Ả': "A", 'ả': "a", 'Ấ': "A", 'ấ': "a",
+	'Ầ': "A", 'ầ': "a", 'Ẩ': "A", 'ẩ': "a",
+	'Ẫ': "A", 'ẫ': "a", 'Ậ': "A", 'ậ': "a",
+	'Ắ': "A", 'ắ': "a", 'Ằ': "A", 'ằ': "a",
+	'Ẳ': "A", 'ẳ': "a", 'Ẵ': "A", 'ẵ': "a",
+	'Ặ': "A", 'ặ': "a", 'Ẹ': "E", 'ẹ': "e",
+	'Ẻ': "E", 'ẻ': "e", 'Ẽ': "E", 'ẽ': "e",
+	'Ế': "E", 'ế': "e", 'Ề': "E", 'ề': "e",
+	'Ể': "E", 'ể': "e", 'Ễ': "E", 'ễ': "e",
+	'Ệ': "E", 'ệ': "e", 'Ỉ': "I", 'ỉ': "i",
+	'Ị': "I", 'ị': "i", 'Ọ': "O", 'ọ': "o",
+	'Ỏ': "O", 'ỏ': "o", 'Ố': "O", 'ố': "o",
+	'Ồ': "O", 'ồ': "o", 'Ổ': "O", 'ổ': "o",
+	'Ỗ': "O", 'ỗ': "o", 'Ộ': "O", 'ộ': "o",
+	'Ớ': "O", 'ớ': "o", 'Ờ': "O", 'ờ': "o",
+	'Ở': "O", 'ở': "o", 'Ỡ': "O", 'ỡ': "o",
+	'Ợ': "O", 'ợ': "o", 'Ụ': "U", 'ụ': "u",
+	'Ủ': "U", 'ủ': "u", 'Ứ': "U", 'ứ': "u",
+	'Ừ': "U", 'ừ': "u", 'Ử': "U", 'ử': "u",
+	'Ữ': "U", 'ữ': "u", 'Ự': "U", 'ự': "u",
+	'Ỳ': "Y", 'ỳ': "y", 'Ỵ': "Y", 'ỵ': "y",
+	'Ỷ': "Y", 'ỷ': "y", 'Ỹ': "Y", 'ỹ': "y",
+	'–': "-", '‘': "'", '’': "'", '“': "\"",
+	'”': "\"", '„': "\"", '†': "+", '•': "*",
+	'…': "...", '₠': "ecu", '₢': "cruzeiro", '₣': "french franc",
+	'₤': "lira", '₥': "mill", '₦': "naira", '₧': "peseta",
+	'₨': "rupee", '₩': "won", '₪': "new shequel", '₫': "dong",
+	'€': "euro", '₭': "kip", '₮': "tugrik", '₯': "drachma",
+	'₰': "penny", '₱': "peso", '₲': "guarani", '₳': "austral",
+	'₴': "hryvnia", '₵': "cedi", '₸': "kazakhstani tenge", '₹': "indian rupee",
+	'₺': "turkish lira", '₽': "russian ruble", '₿': "bitcoin", '℠': "sm",
+	'™': "tm", '∂': "d", '∆': "delta", '∑': "sum",
+	'∞': "infinity", '♥': "love", '元': "yuan", '円': "yen",
+	'﷼': "rial", 'ﻵ': "laa", 'ﻷ': "laa", 'ﻹ': "lai",
+	'ﻻ': "la",
 }
 
 // Slugify converts s into a slug. Called with no Options it uses the library
@@ -104,6 +244,11 @@ func Slugify(s string, opts ...Options) string {
 		o.Separator = "-"
 	}
 
+	remove := o.Remove
+	if remove == nil {
+		remove = removeRe
+	}
+
 	var b strings.Builder
 	for _, ch := range s {
 		var appended string
@@ -112,12 +257,12 @@ func Slugify(s string, opts ...Options) string {
 		} else {
 			appended = string(ch)
 		}
-		// If the mapped char is the separator, treat it as a space so that
+		// If the mapped char equals the separator, treat it as a space so that
 		// separator runs collapse naturally.
 		if appended == o.Separator {
 			appended = " "
 		}
-		b.WriteString(removeRe.ReplaceAllString(appended, ""))
+		b.WriteString(remove.ReplaceAllString(appended, ""))
 	}
 	slug := b.String()
 
@@ -128,14 +273,6 @@ func Slugify(s string, opts ...Options) string {
 		slug = strings.TrimSpace(slug)
 	}
 	slug = spaceRe.ReplaceAllString(slug, o.Separator)
-
-	// Collapse repeated separators into a single one.
-	if o.Separator != "" {
-		dup := o.Separator + o.Separator
-		for strings.Contains(slug, dup) {
-			slug = strings.ReplaceAll(slug, dup, o.Separator)
-		}
-	}
 
 	if o.Lower {
 		slug = strings.ToLower(slug)

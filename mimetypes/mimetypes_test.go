@@ -7,8 +7,8 @@ func TestLookup(t *testing.T) {
 		"file.html":      "text/html",
 		"index.htm":      "text/html",
 		"style.css":      "text/css",
-		"app.js":         "application/javascript",
-		"mod.mjs":        "application/javascript",
+		"app.js":         "text/javascript",
+		"mod.mjs":        "text/javascript",
 		"data.json":      "application/json",
 		"doc.xml":        "application/xml",
 		"notes.txt":      "text/plain",
@@ -117,13 +117,13 @@ func TestExtension(t *testing.T) {
 
 func TestCharset(t *testing.T) {
 	yes := map[string]string{
-		"text/plain":               "utf-8",
-		"text/html":                "utf-8",
-		"application/json":         "utf-8",
-		"application/xml":          "utf-8",
-		"application/javascript":   "utf-8",
-		"application/vnd.api+json": "utf-8",
-		"image/svg+xml":            "utf-8",
+		"text/plain":               "UTF-8",
+		"text/html":                "UTF-8",
+		"application/json":         "UTF-8",
+		"application/xml":          "UTF-8",
+		"application/javascript":   "UTF-8",
+		"application/vnd.api+json": "UTF-8",
+		"image/svg+xml":            "UTF-8",
 	}
 	for in, want := range yes {
 		got, ok := Charset(in)
