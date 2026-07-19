@@ -42,10 +42,24 @@ package uniq
 // element of s, preserving the order in which those elements first appear.
 //
 // A nil or empty input yields an empty (non-nil) slice.
+//
+// Following lodash's SameValueZero semantics, all NaN values are treated as
+// equal to one another (so a run of NaNs collapses to a single NaN), even
+// though NaN != NaN. This is detected generically: for a comparable value,
+// v != v is true only for NaN floats and false for every other value.
 func Uniq[T comparable](s []T) []T {
 	seen := make(map[T]struct{}, len(s))
 	result := make([]T, 0, len(s))
+	seenNaN := false
 	for _, v := range s {
+		if v != v { // NaN-like: SameValueZero treats all NaN as equal.
+			if seenNaN {
+				continue
+			}
+			seenNaN = true
+			result = append(result, v)
+			continue
+		}
 		if _, ok := seen[v]; ok {
 			continue
 		}
@@ -60,11 +74,23 @@ func Uniq[T comparable](s []T) []T {
 //
 // This is the accessor-based variant of Uniq: two elements are considered
 // duplicates when key returns equal values for them.
+//
+// As in Uniq, NaN keys follow lodash's SameValueZero semantics and are all
+// treated as equal to one another.
 func UniqBy[T any, K comparable](s []T, key func(T) K) []T {
 	seen := make(map[K]struct{}, len(s))
 	result := make([]T, 0, len(s))
+	seenNaN := false
 	for _, v := range s {
 		k := key(v)
+		if k != k { // NaN-like key: SameValueZero treats all NaN as equal.
+			if seenNaN {
+				continue
+			}
+			seenNaN = true
+			result = append(result, v)
+			continue
+		}
 		if _, ok := seen[k]; ok {
 			continue
 		}

@@ -57,7 +57,11 @@ func KebabCase(s string) string {
 	var b strings.Builder
 	for i, r := range runes {
 		switch {
-		case r == ' ' || r == '_' || r == '-':
+		case !(unicode.IsLetter(r) || unicode.IsDigit(r)):
+			// Any character that is neither a letter nor a digit acts as a word
+			// separator, mirroring the upstream change-case strip regexp
+			// /[^\p{L}\d]+/ rather than only recognizing space, underscore and
+			// hyphen.
 			b.WriteRune('-')
 		case unicode.IsUpper(r):
 			if i > 0 {
