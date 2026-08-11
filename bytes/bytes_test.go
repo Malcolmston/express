@@ -31,7 +31,10 @@ func TestParse(t *testing.T) {
 }
 
 func TestParseErrors(t *testing.T) {
-	for _, in := range []string{"", "abc", "1 foo", "kb"} {
+	// "1 foo" used to be listed here. It is not an error upstream: the unit
+	// grammar misses, parseInt("1 foo", 10) returns 1, and bytes.parse answers
+	// 1 byte. See TestParseIntFallback.
+	for _, in := range []string{"", "abc", "kb"} {
 		if _, err := Parse(in); err == nil {
 			t.Errorf("Parse(%q) expected error", in)
 		}
