@@ -24,7 +24,7 @@ func TestSignVerify(t *testing.T) {
 
 func TestSignUsesFirstKey(t *testing.T) {
 	kg := New([]string{"a", "b"})
-	if kg.Sign("data") != sign("data", "a") {
+	if kg.Sign("data") != New([]string{"a"}).Sign("data") {
 		t.Fatal("Sign should use first key")
 	}
 }
@@ -71,7 +71,7 @@ func TestKeysCopied(t *testing.T) {
 	keys := []string{"a", "b"}
 	kg := New(keys)
 	keys[0] = "mutated"
-	if kg.Sign("x") != sign("x", "a") {
+	if kg.Sign("x") != New([]string{"a"}).Sign("x") {
 		t.Fatal("Keygrip should not be affected by caller mutation")
 	}
 }

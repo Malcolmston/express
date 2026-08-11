@@ -84,3 +84,129 @@ that does not fit npm's grammar instead of treating it as a wildcard, `Coerce`
 rejects a component with a leading zero, `IncWith` validates its identifier, and
 `Sort` preserves the input strings and breaks precedence ties with build
 metadata like upstream's `compareBuild`.
+
+## `jsonwebtoken` (npm `jsonwebtoken`, oracle `jsonwebtoken@9.0.3`)
+
+Parity: 120/120 compared cases (100%), 9 deviations.
+Harness: `parity/express/nested/jsonwebtoken/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `Decode` and `DecodeComplete` return `ErrInvalidToken` for a malformed token, where `jwt.decode` returns `null`. | `dec-two-segments`, `dec-empty-token`, `dec-malformed-base64` | Go's convention for "I could not do that" is an error, not a nil result the caller may forget to check. The distinction matters here precisely because the value is untrusted. |
+| A payload that is valid JSON but not an object is an error, where upstream returns the bare value. | `dec-non-json-payload` | `Decode` returns `Claims`, i.e. `map[string]interface{}`. A JWT payload that is a bare string or number is not something a claims-reading caller can use. |
+| `Sign` refuses the unsecured `none` algorithm outright; upstream can mint an unsigned token. | `sign-alg-none` | The package implements the HMAC family only. An unsigned token is not a token, and there is no legitimate reason for a Go program to be able to mint one. |
+| `Sign` refuses asymmetric key material (a PEM key or certificate) as an HMAC secret; upstream refuses it only on `verify`. | `sign-hs256-with-public-key-pem` | Upstream's asymmetry is the bug: `jwt.sign(payload, publicKeyPem)` happily produces exactly the forgery `jwt.verify` then rejects, which is how the algorithm-confusion attack is built. Refusing it in both directions is strictly safer and has no legitimate use. |
+| `SignOptions.Audience` is a `[]string`, so a single entry is written as a JSON string; Node's `audience: ["x"]` — an array of exactly one — has no distinct Go spelling. | `sign-audience-single-element-array` | The common form, `audience: "x"`, is the one worth expressing. Making `Audience` an `any` to reproduce the difference would push the type check to runtime for every caller. |
+| Only a positive `ExpiresIn`/`NotBefore` counts as set; upstream honours zero and negative values. | `sign-zero-expires-in`, `sign-negative-expires-in` | `time.Duration` has no "absent" value, so the zero value must mean "option not supplied". A caller who wants an already-expired token can set the `exp` claim directly. |
+| A caller-supplied `header` cannot override `alg` or `typ`; upstream's `Object.assign` lets it. | `sign-extra-header-params` (covered, not divergent, because the case supplies neither) | A token whose advertised algorithm disagrees with the MAC that was actually computed is a bug generator. Extra header parameters are merged as upstream merges them. |
+
+Everything else is upstream's behaviour, including the parts that are easy to get
+wrong: `exp` is inclusive and `nbf` is not, `clockTolerance` widens both, `maxAge`
+is measured from `iat` and fails when `iat` is absent, `expiresIn`/`notBefore` are
+measured from the payload's own `iat` when it has one, `noTimestamp` deletes an
+`iat` the caller supplied, an option that would overwrite an existing claim is
+refused rather than silently winning, and the header and payload are emitted in an
+order that reproduces upstream's token bytes exactly.
+
+Three behaviours in this package were **fixed** rather than declared, because
+upstream was right and the port was unsafe: an HMAC token is no longer verified
+against asymmetric key material (algorithm confusion), an empty secret is refused
+by both `Sign` and `Verify`, and a non-nil but empty `VerifyOptions.Algorithms`
+(or `Issuer`) now permits nothing instead of everything. See
+`parity/express/nested/jsonwebtoken/security.json`.
+
+## `jwtdecode` (npm `jwt-decode`, oracle `jwt-decode@4.0.0`)
+
+Parity: 45/45 compared cases (100%), 4 deviations.
+Harness: `parity/express/nested/jwtdecode/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| A payload that is valid JSON but not an object is an error, where `jwtDecode` returns the bare value. | `reject-json-number-payload`, `reject-json-string-payload`, `reject-json-array-payload`, `reject-json-true-payload` | `Decode` and `DecodeHeader` return `map[string]interface{}`. Returning `any` so that a number could come back would make every caller type-assert. `null` is the one non-object payload both sides agree on, and it is covered by `accept-json-null-payload`. |
+
+`ErrInvalidToken` replaces upstream's `InvalidTokenError`, and one sentinel covers
+the four messages upstream distinguishes; per `parity/HARNESS.md` the harness
+compares whether the call failed, and the message difference is recorded in that
+harness's `COVERAGE.md`. Segment selection and base64 decoding were **fixed** to
+match upstream exactly rather than declared: a two-segment string still yields a
+payload, a fourth segment is ignored, and both base64 alphabets are accepted.
+
+## `otpauth` (npm `otpauth`, oracle `otpauth@9.5.1`)
+
+Parity: 158/158 compared cases (100%), 6 deviations.
+Harness: `parity/express/nested/otpauth/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `DecodeSecret` rejects an empty secret; upstream HMACs a zero-length key. | `secret-empty`, `gen-empty-secret` | A one-time password derived from an empty key is the same for everyone. Refusing it turns a silent authentication bypass into an error at enrollment. |
+| `DecodeSecret` rejects a base32 string whose length leaves a partial byte; upstream discards the partial bits. | `secret-single-char`, `secret-nine-chars`, `gen-single-char-secret` | A truncated secret means the enrollment QR code was mis-copied. Generating codes from a silently shortened key would make the failure appear later, as an unexplained mismatch. |
+| The `SHA3-224/256/384/512` algorithms an otpauth URI may name can be parsed but not computed. | `gen-sha3-algorithm` | SHA-3 is not in the Go standard library and this package has no dependencies. `Parse` still accepts such a URI, as upstream does, so a caller can detect and reject it explicitly. |
+
+The rest of the URI layer was **fixed** to match upstream byte for byte rather
+than declared: `URL` escapes components exactly as `encodeURIComponent` does,
+always writes the effective `algorithm`, `digits` and `period`/`counter`, and
+canonicalises the secret; `Parse` rejects an unknown type, a missing or non-base32
+secret, an HOTP URI with no counter, a non-positive `digits`/`period`, an unknown
+algorithm and an empty label, fills in the scheme's defaults, and does not treat
+`+` in the query as a space. `Config.OmitIssuerFromLabel` mirrors upstream's
+`issuerInLabel` with the sense inverted so that the Go zero value is the common
+case. Codes longer than ten digits are zero padded as upstream's `padStart` does
+rather than clamped.
+
+## `keygrip` (npm `keygrip`, oracle `keygrip@1.1.0`)
+
+Parity: 63/63 compared cases (100%), 2 deviations.
+Harness: `parity/express/nested/keygrip/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `New(keys)` defaults to HMAC-SHA256; `keygrip(keys)` defaults to HMAC-SHA1. | `sign-default-scheme`, `verify-default-scheme` | Adopting upstream's default would weaken every caller and, worse, silently invalidate every digest already issued by this package. `NewWithOptions(keys, Options{Algorithm: "sha1"})` reproduces upstream's default exactly — case `sign-sha1` proves the digests are identical — so interoperating with a Node service costs one argument. |
+
+`NewWithOptions` was **added** rather than the difference declared, so that the
+`algorithm` and `encoding` arguments of the Node constructor are expressible at
+all: `sha1`, `sha256`, `sha384`, `sha512` and `md5`, with `base64` (the Node
+default), `base64url` and `hex`. An unrecognised algorithm or encoding is an error
+on both sides. `New` still panics on an empty key list, as the Node constructor
+throws, and still copies the caller's slice — upstream closes over the array, so a
+later mutation changes its keys, which is not a behaviour worth reproducing.
+
+## `statuses` (npm `statuses`, oracle `statuses@2.0.1`)
+
+Parity: 141/141 compared cases (100%), 1 deviation.
+Harness: `parity/express/nested/statuses/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| There is no dual-dispatch entry point equivalent to upstream's default `statuses(codeOrMessage)`, and in particular `Code("404")` is a lookup miss where `statuses('404')` returns `"Not Found"`. | `status-numeric-string` | Upstream's callable `parseInt`s a string argument and, if it parses, treats it as a status *code* rather than a reason phrase — a coercion that exists only because one JavaScript function is overloaded on argument type. Go splits the operation into `Message(int)` and `Code(string)`, and `"404"` is not a registered reason phrase: no HTTP status is named "404". Upstream is the outlier. Both arms of the dispatch are covered by cases and agree with upstream on every non-coerced input. |
+
+Everything else in this port is upstream's behaviour, data included: the same 63
+codes, the same phrases (`"I'm a Teapot"`, `"Unprocessable Entity"` — both of
+which differ between `statuses` major versions), and the same three
+classification sets, with 304 deliberately excluded from `IsRedirect` because it
+is cache validation rather than a redirect.
+
+One behaviour was **fixed** rather than declared: `Code` used to trim surrounding
+whitespace before looking a phrase up, so `Code(" Not Found ")` returned 404
+where upstream reports a miss. Accepting input upstream rejects is a divergence
+however convenient it reads, so the trim was removed.
+
+## The HTTP content-negotiation cluster
+
+`accepts`, `negotiator`, `type-is`, `mime-types` and `content-type` all measure
+**100% of compared cases with no deviations at all** — see
+`parity/express/nested/{accepts,negotiator,typeis,mimetypes,contenttype}/`. Each
+of those ports had real divergences when first measured, and every one of them
+was fixed rather than declared; the per-harness `COVERAGE.md` lists what changed.
+Two notes worth carrying here, because they are the kind of thing that looks like
+a bug when read in isolation:
+
+- `Accepts.Types`/`Languages`/`Charsets`/`Encodings` return the whole ranked
+  `[]string` even when offers are supplied, where the Node package overloads the
+  plural name onto the singular function and returns one value. Taking the first
+  element reproduces upstream exactly, which is how `Type`, `Language`, `Charset`
+  and `Encoding` are defined. This is a superset, not a difference in answer.
+- An **absent** `Accept`/`Accept-Language`/`Accept-Charset` header means "anything
+  is acceptable" while a header that is *present but empty* accepts **nothing**.
+  Both packages now distinguish the two through `http.Header.Values`, because
+  upstream distinguishes `undefined` from `''` and collapsing them made the port
+  serve content the client had explicitly refused.

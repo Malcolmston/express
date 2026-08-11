@@ -17,7 +17,7 @@ func TestURLContains(t *testing.T) {
 	u := URL(c)
 
 	for _, sub := range []string{
-		"otpauth://totp/ACME%20Co:alice@example.com",
+		"otpauth://totp/ACME%20Co:alice%40example.com",
 		"secret=JBSWY3DPEHPK3PXP",
 		"issuer=ACME%20Co",
 	} {

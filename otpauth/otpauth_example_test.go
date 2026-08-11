@@ -2,6 +2,7 @@ package otpauth_test
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/malcolmston/express/otpauth"
 )
@@ -23,7 +24,7 @@ func ExampleURL() {
 		Period:  30,
 	}
 	fmt.Println(otpauth.URL(c))
-	// Output: otpauth://totp/ACME%20Co:alice@example.com?issuer=ACME%20Co&secret=JBSWY3DPEHPK3PXP&digits=6&period=30
+	// Output: otpauth://totp/ACME%20Co:alice%40example.com?issuer=ACME%20Co&secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&period=30
 }
 
 // ExampleURL_hotp builds a counter-based HOTP otpauth:// URI. Selecting the
@@ -42,7 +43,7 @@ func ExampleURL_hotp() {
 		Counter: 5,
 	}
 	fmt.Println(otpauth.URL(c))
-	// Output: otpauth://hotp/ACME:bob?issuer=ACME&secret=JBSWY3DPEHPK3PXP&digits=6&counter=5
+	// Output: otpauth://hotp/ACME:bob?issuer=ACME&secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&counter=5
 }
 
 // ExampleParse reads an otpauth:// URI back into a Config, the inverse of URL.
@@ -61,4 +62,51 @@ func ExampleParse() {
 	fmt.Printf("type=%s issuer=%q account=%q secret=%s digits=%d period=%d\n",
 		c.Type, c.Issuer, c.Account, c.Secret, c.Digits, c.Period)
 	// Output: type=totp issuer="ACME Co" account="alice@example.com" secret=JBSWY3DPEHPK3PXP digits=6 period=30
+}
+
+// ExampleConfig_Generate computes a TOTP code from a parsed configuration. The
+// counter is the RFC 6238 time step floor(unix / period), so a fixed timestamp
+// yields a deterministic code — here the RFC 6238 Appendix B vector for t=59.
+func ExampleConfig_Generate() {
+	c := otpauth.Config{
+		Secret:    "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", // base32 of "12345678901234567890"
+		Digits:    8,
+		Period:    30,
+		Algorithm: "SHA1",
+	}
+	code, err := c.Generate(time.Unix(59, 0))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(code)
+	// Output: 94287082
+}
+
+// ExampleConfig_Validate accepts a code from the neighbouring time step, which
+// is how a server tolerates a phone whose clock is slightly behind. The
+// returned delta reports how far off the code was, in steps.
+func ExampleConfig_Validate() {
+	c := otpauth.Config{Secret: "JBSWY3DPEHPK3PXP"}
+	now := time.Unix(1700000000, 0)
+
+	// The user typed a code generated one 30-second step ago.
+	stale, _ := c.Generate(now.Add(-30 * time.Second))
+
+	delta, ok := c.Validate(stale, now, 1)
+	fmt.Println(ok, delta)
+	// Output: true -1
+}
+
+// ExampleConfig_GenerateCounter shows the counter-based HOTP primitive against
+// the RFC 4226 Appendix D vectors.
+func ExampleConfig_GenerateCounter() {
+	c := otpauth.Config{Type: "hotp", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"}
+	for counter := uint64(0); counter < 3; counter++ {
+		code, _ := c.GenerateCounter(counter)
+		fmt.Println(code)
+	}
+	// Output:
+	// 755224
+	// 287082
+	// 359152
 }

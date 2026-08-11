@@ -25,14 +25,22 @@
 // use the jsonwebtoken package's Verify to validate a signed token before acting
 // on its claims. jwtdecode is for reading, not trusting.
 //
-// The functions validate structure but not content: a token that does not split
-// into exactly three dot-separated segments, or whose selected segment is not
-// valid base64url or not valid JSON, returns ErrInvalidToken. Empty input is
-// therefore rejected as malformed. Compared with the Node package, this port
-// covers the header and payload decode paths and returns a typed error instead
-// of throwing an InvalidTokenError; it does not accept configuration options
-// such as jwt-decode's { header: true } flag, offering the dedicated
-// DecodeHeader function instead.
+// The functions validate structure but not content, and only as far as the
+// segment they are asked for: like the Node package they select segment #1
+// (DecodeHeader) or #2 (Decode) from the dot-separated string and never look at
+// the rest, so a two-segment string still yields a payload and a fourth segment
+// is ignored. A missing segment, a segment that is not valid base64 or not a
+// valid JSON object returns ErrInvalidToken; empty input is therefore rejected
+// as malformed. Decoding follows the Node implementation exactly: '-' and '_'
+// are rewritten to '+' and '/', the length is padded up to a multiple of four
+// (a length that is one more than a multiple of four cannot be base64 and is
+// rejected), and both base64 alphabets are consequently accepted. Compared with
+// the Node package, this port returns a typed error instead of throwing an
+// InvalidTokenError, and offers the dedicated DecodeHeader function rather than
+// jwt-decode's { header: true } flag; because it returns a
+// map[string]interface{}, a payload that is valid JSON but not an object (a
+// bare number, string, array or boolean) is an error here where jwt-decode
+// returns the value.
 package jwtdecode
 
 import (
@@ -45,10 +53,35 @@ import (
 // ErrInvalidToken is returned when the token is malformed.
 var ErrInvalidToken = errors.New("jwtdecode: invalid token")
 
-func decodeSegment(seg string) (map[string]interface{}, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(seg, "="))
+// b64Decode mirrors the base64UrlDecode of jwt-decode: rewrite the URL-safe
+// alphabet onto the standard one, restore the padding the encoder stripped, and
+// reject a length that no base64 string can have.
+func b64Decode(seg string) ([]byte, error) {
+	s := strings.ReplaceAll(strings.ReplaceAll(seg, "-", "+"), "_", "/")
+	switch len(s) % 4 {
+	case 0:
+	case 2:
+		s += "=="
+	case 3:
+		s += "="
+	default:
+		return nil, ErrInvalidToken
+	}
+	raw, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
 		return nil, ErrInvalidToken
+	}
+	return raw, nil
+}
+
+func decodeSegment(token string, index int) (map[string]interface{}, error) {
+	parts := strings.Split(token, ".")
+	if index >= len(parts) {
+		return nil, ErrInvalidToken
+	}
+	raw, err := b64Decode(parts[index])
+	if err != nil {
+		return nil, err
 	}
 	var m map[string]interface{}
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -59,18 +92,10 @@ func decodeSegment(seg string) (map[string]interface{}, error) {
 
 // Decode decodes the payload (second segment) of a JWT without verifying it.
 func Decode(token string) (map[string]interface{}, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, ErrInvalidToken
-	}
-	return decodeSegment(parts[1])
+	return decodeSegment(token, 1)
 }
 
 // DecodeHeader decodes the header (first segment) of a JWT without verifying it.
 func DecodeHeader(token string) (map[string]interface{}, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, ErrInvalidToken
-	}
-	return decodeSegment(parts[0])
+	return decodeSegment(token, 0)
 }

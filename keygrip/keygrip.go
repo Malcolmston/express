@@ -36,53 +36,132 @@
 // against caller-side mutation by copying the supplied slice, so later changes
 // to the caller's array do not affect signing, and it panics when given an
 // empty key list because a keygrip with no keys can neither sign nor verify.
-// The chief intentional divergence from Node is that this port fixes the digest
-// algorithm to HMAC-SHA256 with base64url output, whereas the JavaScript
-// library lets the caller configure the hash and encoding; callers needing a
-// different scheme should adapt sign accordingly.
+//
+// The Node constructor takes two further arguments, keygrip(keys, algorithm,
+// encoding), which NewWithOptions mirrors: Algorithm selects the HMAC hash
+// ("sha1", "sha256", "sha384", "sha512" or "md5") and Encoding how the digest
+// is rendered ("base64", the Node default, "base64url" — the same string, since
+// Node rewrites '+' and '/' and strips '=' — or "hex"). The one intentional
+// divergence from Node is the default hash: New, and NewWithOptions with an
+// empty Algorithm, use HMAC-SHA256, whereas the JavaScript library defaults to
+// the weaker SHA-1. Pass Algorithm: "sha1" explicitly to interoperate with
+// digests produced by a Node service that relies on that default.
 package keygrip
 
 import (
 	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"hash"
+	"strings"
 )
 
 // Keygrip holds an ordered list of secret keys. The first key is used for
 // signing, while all keys are tried during verification to support key
 // rotation.
 type Keygrip struct {
-	keys []string
+	keys    []string
+	newHash func() hash.Hash
+	encode  func([]byte) string
 }
 
-// New creates a Keygrip from the given keys. The first key is used to sign new
-// data; older keys remain valid for verification. New panics if keys is empty.
+// Options configures the digest scheme, mirroring the second and third
+// arguments of the Node constructor keygrip(keys, algorithm, encoding).
+type Options struct {
+	// Algorithm is the HMAC hash: "sha1", "sha256", "sha384", "sha512" or
+	// "md5", case-insensitive. Empty means "sha256" (see the package comment:
+	// Node defaults to "sha1" instead).
+	Algorithm string
+	// Encoding is how the digest bytes are rendered: "base64" (the Node
+	// default), "base64url" or "hex", case-insensitive. Empty means "base64".
+	// Node rewrites '+' to '-', '/' to '_' and strips '=' from its base64
+	// output, so "base64" and "base64url" produce the same unpadded base64url
+	// string here.
+	Encoding string
+}
+
+func hasherFor(algorithm string) (func() hash.Hash, error) {
+	switch strings.ToLower(strings.TrimSpace(algorithm)) {
+	case "", "sha256":
+		return sha256.New, nil
+	case "sha1":
+		return sha1.New, nil
+	case "sha384":
+		return sha512.New384, nil
+	case "sha512":
+		return sha512.New, nil
+	case "md5":
+		return md5.New, nil
+	default:
+		return nil, fmt.Errorf("keygrip: unsupported algorithm %q", algorithm)
+	}
+}
+
+func encoderFor(encoding string) (func([]byte) string, error) {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "", "base64", "base64url":
+		return base64.RawURLEncoding.EncodeToString, nil
+	case "hex":
+		return hex.EncodeToString, nil
+	default:
+		return nil, fmt.Errorf("keygrip: unsupported encoding %q", encoding)
+	}
+}
+
+// New creates a Keygrip from the given keys, signing with HMAC-SHA256 and
+// unpadded base64url. The first key is used to sign new data; older keys remain
+// valid for verification. New panics if keys is empty.
 func New(keys []string) *Keygrip {
+	k, err := NewWithOptions(keys, Options{})
+	if err != nil {
+		panic(err)
+	}
+	return k
+}
+
+// NewWithOptions creates a Keygrip with an explicit digest scheme, the
+// equivalent of the Node constructor keygrip(keys, algorithm, encoding). It
+// returns an error for an unrecognised algorithm or encoding, and panics if
+// keys is empty, as New does.
+func NewWithOptions(keys []string, opts Options) (*Keygrip, error) {
 	if len(keys) == 0 {
 		panic("keygrip: keys must not be empty")
 	}
+	newHash, err := hasherFor(opts.Algorithm)
+	if err != nil {
+		return nil, err
+	}
+	encode, err := encoderFor(opts.Encoding)
+	if err != nil {
+		return nil, err
+	}
 	cp := make([]string, len(keys))
 	copy(cp, keys)
-	return &Keygrip{keys: cp}
+	return &Keygrip{keys: cp, newHash: newHash, encode: encode}, nil
 }
 
-// sign computes the base64url (unpadded) HMAC-SHA256 digest of data using key.
-func sign(data, key string) string {
-	mac := hmac.New(sha256.New, []byte(key))
+// sign computes the digest of data using key under the receiver's scheme.
+func (k *Keygrip) sign(data, key string) string {
+	mac := hmac.New(k.newHash, []byte(key))
 	mac.Write([]byte(data))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return k.encode(mac.Sum(nil))
 }
 
 // Sign returns the digest of data computed with the current (first) key.
 func (k *Keygrip) Sign(data string) string {
-	return sign(data, k.keys[0])
+	return k.sign(data, k.keys[0])
 }
 
 // Index returns the index of the first key that produces digest for data,
 // using a constant-time comparison, or -1 if no key matches.
 func (k *Keygrip) Index(data, digest string) int {
 	for i, key := range k.keys {
-		if hmac.Equal([]byte(digest), []byte(sign(data, key))) {
+		if hmac.Equal([]byte(digest), []byte(k.sign(data, key))) {
 			return i
 		}
 	}
