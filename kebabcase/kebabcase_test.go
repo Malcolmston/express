@@ -14,7 +14,7 @@ func TestKebabCase(t *testing.T) {
 		{"FooBar", "foo-bar"},
 		{"fooBarBaz", "foo-bar-baz"},
 		{"foo123Bar", "foo123-bar"},
-		{"FOOBar", "foobar"},
+		{"FOOBar", "foo-bar"},
 		{"foo   bar", "foo-bar"},
 		{"__foo__bar__", "foo-bar"},
 		{"--foo--bar--", "foo-bar"},
@@ -24,7 +24,7 @@ func TestKebabCase(t *testing.T) {
 		{"   ", ""},
 		{"HelloWorld", "hello-world"},
 		{"already-kebab-case", "already-kebab-case"},
-		{"XMLHttpRequest", "xmlhttp-request"},
+		{"XMLHttpRequest", "xml-http-request"},
 	}
 	for _, c := range cases {
 		if got := KebabCase(c.in); got != c.want {

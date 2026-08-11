@@ -122,13 +122,13 @@ func camelCase(input string, pascal bool) string {
 			return prefix
 		}
 		if pascal {
-			return prefix + string(unicode.ToUpper(r))
+			return prefix + string(upperRune(r))
 		}
-		return prefix + string(unicode.ToLower(r))
+		return prefix + lowerString(string(r))
 	}
 
 	// Insert separators at camelCase / ACRONYMWord boundaries.
-	if input != strings.ToLower(input) {
+	if input != lowerString(input) {
 		runes = preserveCamelCase(runes)
 	}
 
@@ -141,12 +141,12 @@ func camelCase(input string, pascal bool) string {
 
 	// Normalize base casing: lower-case everything (capitalizeAfterNumber is
 	// true and preserveConsecutiveUppercase is false, matching the defaults).
-	for idx := range runes {
-		runes[idx] = unicode.ToLower(runes[idx])
-	}
+	// Lowercasing is a whole-string operation because the full mapping's
+	// final-sigma rule depends on the neighbouring runes.
+	runes = []rune(lowerString(string(runes)))
 
 	if pascal && len(runes) > 0 {
-		runes[0] = unicode.ToUpper(runes[0])
+		runes = append(upperRune(runes[0]), runes[1:]...)
 	}
 
 	return prefix + postProcess(runes)
@@ -235,7 +235,12 @@ func numbersPass(runes []rune) []rune {
 			if after < len(runes) && isSeparator(runes[after]) {
 				// Continued token: do not force a new word.
 			} else {
-				runes[j] = unicode.ToUpper(runes[j])
+				// The full uppercase mapping can expand to several runes
+				// ("ß" -> "SS"), so splice rather than assign.
+				up := upperRune(runes[j])
+				tail := append([]rune(nil), runes[j+1:]...)
+				runes = append(append(runes[:j:j], up...), tail...)
+				j += len(up) - 1
 			}
 			i = j + 1
 		} else {
@@ -266,7 +271,7 @@ func separatorsPass(runes []rune) string {
 		}
 		switch {
 		case j < len(runes) && isIdentifier(runes[j]):
-			b.WriteRune(unicode.ToUpper(runes[j]))
+			b.WriteString(string(upperRune(runes[j])))
 			i = j + 1
 		case j >= len(runes):
 			// Trailing separators: dropped.

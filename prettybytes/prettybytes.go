@@ -176,22 +176,61 @@ func fractionDigits(opts Options) (minFD, maxFD int) {
 	return minFD, maxFD
 }
 
-// formatPrecision mirrors JavaScript's Number.prototype.toPrecision followed by
-// Number()+String(): it keeps at least `p` significant digits (never rounding
-// away integer digits) and strips trailing zeros. Upstream calls toLocaleString
-// with no locale and no options in this path, which returns the number
-// unformatted, so — unlike the locale path — it does NOT group with commas.
+// formatPrecision mirrors upstream's
+//
+//	minPrecision = Math.max(3, Math.floor(number).toString().length)
+//	number = Number(number.toPrecision(minPrecision))
+//
+// followed by the String(number) coercion that concatenating the number into the
+// result performs: it keeps at least `p` significant digits, never rounding away
+// integer digits, and strips trailing zeros. Upstream calls toLocaleString with
+// no locale and no options in this path, which returns the number unformatted,
+// so — unlike the locale path — it does NOT group with commas.
 func formatPrecision(n float64, p int) string {
 	if n == 0 {
 		return "0"
 	}
-	e := int(math.Floor(math.Log10(n)))
-	decimals := p - 1 - e
-	if decimals < 0 {
-		decimals = 0
+	minPrecision := p
+	if d := len(jsNumberString(math.Floor(n))); d > minPrecision {
+		minPrecision = d
 	}
-	s := strconv.FormatFloat(n, 'f', decimals, 64)
-	return strip(s)
+	// FormatFloat with 'g' and an explicit precision is toPrecision; parsing it
+	// back is the Number() round trip.
+	v, err := strconv.ParseFloat(strconv.FormatFloat(n, 'g', minPrecision, 64), 64)
+	if err != nil {
+		v = n
+	}
+	return jsNumberString(v)
+}
+
+// jsNumberString renders n the way JavaScript's String(Number) does. That matters
+// because pretty-bytes concatenates a Number into its result: the fixed notation
+// is used only while the magnitude stays inside [1e-6, 1e21), and outside that
+// window JavaScript switches to exponential notation with an unpadded exponent
+// ("1e-9" and "1e+76", not "1e-09" and "1000000...0").
+func jsNumberString(n float64) string {
+	if n == 0 {
+		return "0"
+	}
+	abs := math.Abs(n)
+	if abs >= 1e21 || abs < 1e-6 {
+		s := strconv.FormatFloat(n, 'e', -1, 64)
+		i := strings.IndexByte(s, 'e')
+		if i < 0 {
+			return s
+		}
+		mantissa, exp := s[:i], s[i+1:]
+		sign := ""
+		if len(exp) > 0 && (exp[0] == '+' || exp[0] == '-') {
+			sign, exp = string(exp[0]), exp[1:]
+		}
+		exp = strings.TrimLeft(exp, "0")
+		if exp == "" {
+			exp = "0"
+		}
+		return mantissa + "e" + sign + exp
+	}
+	return strip(strconv.FormatFloat(n, 'f', -1, 64))
 }
 
 // formatLocale truncates (toward zero) to maxFD digits, then removes trailing

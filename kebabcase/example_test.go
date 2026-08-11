@@ -20,19 +20,19 @@ func ExampleKebabCase() {
 
 // This example demonstrates how separators and consecutive capitals are
 // handled. Underscores are treated as word separators just like spaces, so
-// "foo_bar" splits into two words. A run of adjacent capitals such as the
-// "XML" prefix in "XMLHttpRequest" is treated as a single word because no
-// lowercase letter or digit precedes each capital. A boundary is only inserted
-// where a lowercase letter is followed by a capital, which is why the split
-// falls between "xmlhttp" and "request". These rules make the transformation
-// deterministic on acronym-heavy identifiers.
+// "foo_bar" splits into two words. A run of adjacent capitals is one word until
+// a lower-case letter follows, at which point the acronym rule splits before
+// the last capital: "XMLHttpRequest" becomes "xml-http-request". A boundary is
+// also inserted where a lower-case letter or an ASCII digit is followed by a
+// capital. These rules make the transformation deterministic on acronym-heavy
+// identifiers.
 func ExampleKebabCase_separators() {
 	fmt.Println(kebabcase.KebabCase("foo_bar"))
 	fmt.Println(kebabcase.KebabCase("XMLHttpRequest"))
 	fmt.Println(kebabcase.KebabCase("foo123Bar"))
 	// Output:
 	// foo-bar
-	// xmlhttp-request
+	// xml-http-request
 	// foo123-bar
 }
 

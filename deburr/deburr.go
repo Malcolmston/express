@@ -19,9 +19,11 @@
 // (é to e, ñ to n), and certain letters expand to a short digraph (æ to ae, ß to
 // ss, Þ to Th, Œ to Oe, and so on), preserving the case of the original. The
 // second is a set of combining-mark ranges — the Combining Diacritical Marks
-// block and its Extended, Supplement, for-Symbols, and Half-Marks siblings —
-// whose runes are dropped so that a base letter followed by a standalone
-// combining accent survives as just the base letter.
+// block together with the for-Symbols and Half-Marks blocks, exactly the ranges
+// lodash's regexp uses — whose runes are dropped so that a base letter followed
+// by a standalone combining accent survives as just the base letter. The
+// Combining Diacritical Marks Extended and Supplement blocks are not stripped,
+// because lodash does not strip them either.
 //
 // The edge cases follow from that design. A rune that is neither a known
 // accented letter nor a combining mark is passed through unchanged, so ASCII
@@ -104,15 +106,20 @@ var deburredLetters = map[rune]string{
 }
 
 // isComboMark reports whether r is a combining diacritical mark that should be
-// stripped. It covers the same Unicode ranges as lodash's combining-mark
-// regular expression.
+// stripped. It covers exactly the ranges of lodash's combining-mark regular
+// expression, which is built from rsComboMarksRange ("\u0300-\u036f" plus the
+// Combining Half Marks "\ufe20-\ufe2f") and rsComboSymbolsRange
+// ("\u20d0-\u20ff"):
+//
+//	node -p 'require("lodash/_baseToString.js"), /[\u0300-\u036f\ufe20-\ufe2f\u20d0-\u20ff]/'
+//
+// The Combining Diacritical Marks Extended (U+1AB0..U+1AFF) and Supplement
+// (U+1DC0..U+1DFF) blocks are deliberately NOT included: lodash defines those
+// ranges for its unicode word splitter but deburr's regexp does not use them, so
+// _.deburr leaves them in place and this port must too.
 func isComboMark(r rune) bool {
 	switch {
 	case r >= '̀' && r <= 'ͯ': // Combining Diacritical Marks
-		return true
-	case r >= '᪰' && r <= '᫿': // Combining Diacritical Marks Extended
-		return true
-	case r >= '᷀' && r <= '᷿': // Combining Diacritical Marks Supplement
 		return true
 	case r >= '⃐' && r <= '⃿': // Combining Diacritical Marks for Symbols
 		return true

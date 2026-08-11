@@ -52,14 +52,30 @@ type Options struct {
 	Remove *regexp.Regexp
 }
 
+// jsSpaceChars is the exact set of characters JavaScript's \s matches (and,
+// equivalently, the set String.prototype.trim strips): the ASCII whitespace
+// controls and space, plus every Unicode space separator, the line and paragraph
+// separators, and the byte-order mark. Go's regexp \s is ASCII-only and
+// unicode.IsSpace disagrees at both ends (it includes U+0085 and excludes
+// U+FEFF), so the class is spelled out here rather than approximated.
+const jsSpaceChars = "\t\n\v\f\r \u0085\u00a0\u1680" +
+	"\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a" +
+	"\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+// jsSpaceClass is jsSpaceChars as a regexp character-class body. U+0085 is
+// deliberately absent: it is whitespace to Go's unicode.IsSpace but not to
+// JavaScript's \s.
+const jsSpaceClass = `\t\n\v\f\r \x{00a0}\x{1680}\x{2000}-\x{200a}` +
+	`\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
+
 var (
 	// removeRe is the default removal pattern. It matches every run of
 	// characters that is NOT a word character, whitespace, or one of the
 	// punctuation marks $*_+~.()'"!-:@ , mirroring the npm default
 	// /[^\w\s$*_+~.()'"!\-:@]+/g.
-	removeRe = regexp.MustCompile(`[^\w\s$*_+~.()'"!\-:@]+`)
-	strictRe = regexp.MustCompile(`[^A-Za-z0-9\s]`)
-	spaceRe  = regexp.MustCompile(`\s+`)
+	removeRe = regexp.MustCompile(`[^\w` + jsSpaceClass + `$*_+~.()'"!\-:@]+`)
+	strictRe = regexp.MustCompile(`[^A-Za-z0-9` + jsSpaceClass + `]`)
+	spaceRe  = regexp.MustCompile(`[` + jsSpaceClass + `]+`)
 )
 
 // charMap transliterates Unicode characters to ASCII equivalents. It is a
@@ -270,7 +286,9 @@ func Slugify(s string, opts ...Options) string {
 		slug = strictRe.ReplaceAllString(slug, "")
 	}
 	if o.Trim {
-		slug = strings.TrimSpace(slug)
+		// String.prototype.trim strips the \s set, which is not what
+		// strings.TrimSpace strips (see jsSpaceChars).
+		slug = strings.Trim(slug, strings.ReplaceAll(jsSpaceChars, "\u0085", ""))
 	}
 	slug = spaceRe.ReplaceAllString(slug, o.Separator)
 

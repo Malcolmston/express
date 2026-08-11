@@ -210,3 +210,96 @@ a bug when read in isolation:
   Both packages now distinguish the two through `http.Header.Values`, because
   upstream distinguishes `undefined` from `''` and collapsing them made the port
   serve content the client had explicitly refused.
+
+## The string / format / id cluster
+
+`slugify`, `pluralize`, `camelcase`, `kebabcase`, `deburr`, `filesize`,
+`prettybytes` and `nanoid` are measured by
+`parity/express/nested/{slugify,pluralize,camelcase,kebabcase,deburr,filesize,prettybytes,nanoid}/`.
+Four of the eight reach **100% of compared cases with no deviations at all**
+(`camelcase` 260/260, `kebabcase` 102/102, `deburr` 81/81, `filesize` 188/188);
+each had real divergences when first measured and every one of them was fixed
+rather than declared. The remaining four carry the deviations below.
+
+### `pluralize` (npm `pluralize`, oracle `pluralize@8.0.0`)
+
+Parity: 450/450 compared cases (100%), 14 deviations, 464 cases total.
+Harness: `parity/express/nested/pluralize/`.
+
+Every difference is one thing: **the port was transcribed from
+plurals/pluralize `master`, which is ahead of the last published release.**
+8.0.0 shipped in 2019 and npm has no publish of master, so the oracle has to be
+8.0.0 — an unpinnable oracle makes the score unreproducible. The port's own
+vector file `pluralize/pluralize_parity_test.go` is extracted from master's
+`test.js`, so "fixing" the port to 8.0.0 would break a suite that is closer to
+upstream's intent than the release is.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `canvas`/`canvases` is an irregular pair. | `pl-057-canvas`, `sg-057-canvases` | master adds the pair; 8.0.0 falls through to the rules and yields `canvas` (unchanged) and `canvase`. |
+| The `-ies` stem rules are wider: `(…\|ok\|…)ies → $1ie` and a longer `\b(…\|hipp\|…\|calor\|…)ies` alternation. | `sg-103-cookies`, `sg-105-calories`, `sg-106-hippies` | master widened them; 8.0.0 falls through to `ies$ → y` and produces `cooky`, `calory`, `hippy`. |
+| `species` is not uncountable, so it singularises to `specie`. | `unc-005-species-sg` | master drops it from the uncountable list; 8.0.0 keeps it. |
+| The possessive pronouns `my`/`our`, `his`/`their`, `her`/`their`, `its`/`their` are irregular pairs. | `devi-my-*`, `devi-his-*`, `devi-her-*`, `devi-its-*` | master adds them; 8.0.0 has none, so it applies the regular rules (`my` → `mies`, `his` → `hi`). |
+
+### `slugify` (npm `slugify`, oracle `slugify@1.6.9`)
+
+Parity: 70/70 compared cases (100%), 5 deviations, 75 cases total.
+Harness: `parity/express/nested/slugify/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `Options.Separator: ""` falls back to `"-"`, so an explicitly empty replacement cannot be expressed. | `opt-replacement-empty` | `Separator` is a plain `string` whose zero value is indistinguishable from "unset", and the documented no-`Options` default is `"-"`. Upstream defaults only when the key is `undefined`, so `slugify("Hello Big World", {replacement: ""})` is `"HelloBigWorld"` there. Making the field a `*string` would break every existing `Options{Separator: "_"}` literal for one rarely used input. |
+| The charmap spells `Ę`, `Ī`, `Ķ` and `Ū` in **upper** case. | `charmap-dev-e-ogonek`, `charmap-dev-i-macron`, `charmap-dev-k-cedilla`, `charmap-dev-u-macron` | The port's table is a verbatim copy of simov/slugify `master`'s `charmap.json`, where these four are `"E"`, `"I"`, `"K"`, `"U"`. The pinned 1.6.9 release still carries the lower-case values, which upstream's *own* Polish and Latvian test vectors contradict — those vectors are what `slugify/slugify_parity_test.go` asserts. Upstream's release is the outlier against upstream's own tests. |
+
+Three real divergences were **fixed** rather than declared while measuring this
+package: JavaScript's `\s` (and `String.prototype.trim`) match the Unicode space
+separators, U+2028/U+2029 and U+FEFF, where Go's regexp `\s` is ASCII-only and
+`strings.TrimSpace` disagrees at both ends. `slugify.go` now spells the class out
+(`jsSpaceChars` / `jsSpaceClass`), so `"a b"`, `"a　b"` and
+`"a b c"` slug the way upstream slugs them instead of losing the
+separator entirely.
+
+### `prettybytes` (npm `pretty-bytes`, oracle `pretty-bytes@7.1.1`)
+
+Parity: 187/187 compared cases (100%), 3 deviations, 190 cases total.
+Harness: `parity/express/nested/prettybytes/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| A non-finite input is formatted rather than rejected: `PrettyBytes(math.NaN())` returns a string where `prettyBytes(NaN)` throws `TypeError`. | `err-nan`, `err-infinity`, `err-neg-infinity` | `PrettyBytes(float64) string` has no error return. The alternatives are panicking from a formatting helper, which is not idiomatic, or widening the signature of a shipped API for an input a caller can check with `math.IsNaN` in one line. |
+
+Two real divergences were **fixed** here: the port always used fixed notation
+where upstream concatenates a JavaScript `Number`, which switches to exponential
+form outside `[1e-6, 1e21)` — `1e-9 B` rather than `0.000000001 B`, and `1e+76 YB`
+rather than a 77-digit integer. `jsNumberString` now reproduces `String(Number)`,
+unpadded exponent included, and `formatPrecision` follows upstream's
+`minPrecision = max(3, String(Math.floor(n)).length)` rule.
+
+### `nanoid` (npm `nanoid`, oracle `nanoid@6.0.1`)
+
+Parity: 123/123 compared cases (100%), 3 deviations, 126 cases total.
+Harness: `parity/express/nested/nanoid/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| With an alphabet of astral-plane characters (`"🌮🌯🥑🌶"`), `Custom` returns a well-formed id of exactly the requested length; `customAlphabet` returns lone surrogates and a shorter id. | `custom-nonascii-03-len`, `custom-nonascii-03-inalpha`, `custom-nonascii-03-charset` | **Upstream is the outlier.** `nanoid` indexes its alphabet with `alphabet[byte & mask]`, i.e. by UTF-16 code unit, so a four-emoji alphabet has it splicing *halves* of surrogate pairs — 13 characters for `size: 16`, several of them unpaired surrogates. Matching that would mean emitting invalid UTF-8 from a Go string. |
+
+One real divergence was **fixed**: `Custom` used to measure and index the
+alphabet in **bytes**, so any multi-byte alphabet both mis-applied the documented
+1..256 limit and spliced individual UTF-8 bytes into the id. It now works in code
+points, which is what upstream's `.length` means for every alphabet inside the
+BMP. Two behaviours are deliberately *stricter* than upstream rather than
+declared as deviations, because upstream's behaviour is a hang rather than an
+answer: an empty alphabet and an alphabet longer than 256 characters both return
+an error here, while `customAlphabet` loops forever.
+
+Two upstream surfaces are **untested** rather than matched, and the reason is
+recorded in `parity/express/nested/nanoid/COVERAGE.md`: `customRandom` and
+`random` give upstream an injectable byte source, so
+`customRandom("abcdef", 10, n => new Uint8Array(n).fill(3))()` is deterministically
+`"dddddddddd"`. `nanoid.Custom` always reads `crypto/rand` and accepts no
+`io.Reader`, so there is no way to feed both implementations the same bytes and
+compare the resulting id. Until the port grows such a seam, the strongest
+cross-language claim available is the property set the harness does check —
+length, alphabet membership, reachability of every alphabet character,
+distinctness, and rejection of an invalid size.

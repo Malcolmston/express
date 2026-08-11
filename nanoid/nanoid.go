@@ -32,7 +32,9 @@
 // to trade length for a larger keyspace.
 //
 // The inputs are validated rather than silently coerced: a negative size, or
-// an alphabet whose length is outside 1..256, produces an error. A size of
+// an alphabet whose length is outside 1..256, produces an error. The alphabet is
+// counted and indexed in characters rather than bytes, so a non-ASCII alphabet
+// yields well-formed ids of exactly the requested number of characters. A size of
 // zero yields the empty id (matching the original's nanoid(0) === "").
 // Note that a shorter id or a smaller alphabet increases the chance of
 // collisions, so those are trade-offs the caller makes deliberately. Compared
@@ -80,22 +82,28 @@ func Custom(alphabet string, size int) (string, error) {
 	if size == 0 {
 		return "", nil
 	}
-	if len(alphabet) < 1 || len(alphabet) > 256 {
+	// The alphabet is indexed by CHARACTER, not by byte: the npm original counts
+	// alphabet.length in UTF-16 units, so a multi-byte alphabet such as
+	// "\u03b1\u03b2\u03b3\u03b4" is four symbols there and must be four
+	// symbols here too. Indexing the string directly would both mis-measure the
+	// 1..256 limit and splice individual UTF-8 bytes into the id.
+	symbols := []rune(alphabet)
+	if len(symbols) < 1 || len(symbols) > 256 {
 		return "", errors.New("nanoid: alphabet length must be in 1..256")
 	}
 
-	// mask is the smallest 2^n-1 >= len(alphabet)-1.
+	// mask is the smallest 2^n-1 >= len(symbols)-1.
 	mask := 1
-	if len(alphabet) > 1 {
-		mask = (2 << (bits.Len(uint(len(alphabet)-1)) - 1)) - 1
+	if len(symbols) > 1 {
+		mask = (2 << (bits.Len(uint(len(symbols)-1)) - 1)) - 1
 	}
 	// step: how many random bytes to request per batch.
-	step := (size * mask * 8) / (len(alphabet) * 5)
+	step := (size * mask * 8) / (len(symbols) * 5)
 	if step < 1 {
 		step = size
 	}
 
-	id := make([]byte, 0, size)
+	id := make([]rune, 0, size)
 	buf := make([]byte, step)
 	for {
 		if _, err := rand.Read(buf); err != nil {
@@ -103,8 +111,8 @@ func Custom(alphabet string, size int) (string, error) {
 		}
 		for i := 0; i < step; i++ {
 			idx := int(buf[i]) & mask
-			if idx < len(alphabet) {
-				id = append(id, alphabet[idx])
+			if idx < len(symbols) {
+				id = append(id, symbols[idx])
 				if len(id) == size {
 					return string(id), nil
 				}

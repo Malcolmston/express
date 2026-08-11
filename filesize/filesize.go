@@ -149,8 +149,20 @@ func FileSizeOpts(bytes float64, opts Options) string {
 		exponent++
 	}
 
-	s := stripTrailingZeros(strconv.FormatFloat(r, 'f', decimals, 64))
-	return prefix + s + " " + units[exponent]
+	return prefix + formatNumber(r, decimals) + " " + units[exponent]
+}
+
+// formatNumber renders the rounded mantissa the way the Node original does.
+// filesize concatenates a JavaScript Number into its result, so the value is
+// stringified by Number.prototype.toString, which switches to exponential
+// notation once the magnitude reaches 1e21: String(1e21) is "1e+21", not
+// "1000000000000000000000". Below that threshold the fixed form is used and
+// trailing zeros (plus a dangling decimal point) are stripped.
+func formatNumber(r float64, decimals int) string {
+	if math.Abs(r) >= 1e21 {
+		return strconv.FormatFloat(r, 'e', -1, 64)
+	}
+	return stripTrailingZeros(strconv.FormatFloat(r, 'f', decimals, 64))
 }
 
 // stripTrailingZeros removes trailing zeros (and a dangling decimal point).
