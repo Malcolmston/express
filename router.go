@@ -1,7 +1,9 @@
 package express
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -238,12 +240,20 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 			basePath := req.path
 
 			// Method must match for route layers (middleware has method "").
-			if l.method != "" && !strings.EqualFold(l.method, req.Method()) {
+			if l.method != "" && !methodMatches(l.method, req.Method()) {
 				continue
 			}
 
 			params, residual, ok := l.pattern.match(basePath)
 			if !ok {
+				continue
+			}
+
+			// A mounted sub-router is an ordinary (three-argument) handler, so
+			// while an error is propagating it is skipped just as Express skips
+			// any non-error middleware. Without this the sub-router's regular
+			// handlers would run as if nothing had gone wrong.
+			if l.mounted != nil && carriedErr != nil {
 				continue
 			}
 
@@ -274,7 +284,48 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 			if l.handler == nil {
 				continue
 			}
-			r.invokeWithParams(req, res, l, next)
+
+			// A path-scoped middleware (a `use` layer with a non-root prefix)
+			// runs with the request path rewritten to the residual after its
+			// mount prefix, exactly as Express strips req.url/req.path for the
+			// duration of the middleware and restores it before continuing.
+			callNext := next
+			if l.method == "" && l.pattern.prefix && l.pattern.rawPath != "" && l.pattern.rawPath != "/" {
+				oldPath := req.path
+				req.path = ensureLeadingSlash(residual)
+				restored := false
+				callNext = func(errs ...error) {
+					if !restored {
+						restored = true
+						req.path = oldPath
+					}
+					next(errs...)
+				}
+			}
+
+			// Catch a panic from the handler and route it to the error chain,
+			// mirroring Express's per-layer try/catch (which turns a synchronous
+			// throw into next(err)). Nested handlers are wrapped in turn, so the
+			// nearest wrapper handles a deep panic and it never double-dispatches.
+			res.next = callNext
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						// Express catches a synchronous throw and routes it to
+						// error-handling middleware. Do the same — but only when
+						// the app actually has an error handler to receive it.
+						// Otherwise re-panic so Go recover-based middleware (e.g.
+						// middleware/panicjson) can still catch it, preserving the
+						// port's non-express panic-recovery convention.
+						if req.errHandlers {
+							callNext(asError(rec))
+							return
+						}
+						panic(rec)
+					}
+				}()
+				r.invokeWithParams(req, res, l, callNext)
+			}()
 			return
 		}
 		// Stack exhausted.
@@ -286,6 +337,55 @@ func (r *Router) handle(req *Request, res *Response, done Next) {
 	}
 
 	next()
+}
+
+// hasErrorHandler reports whether this router or any router mounted beneath it
+// registers error-handling middleware.
+func (r *Router) hasErrorHandler() bool {
+	for _, l := range r.stack {
+		if l.errh != nil {
+			return true
+		}
+		if l.mounted != nil && l.mounted.hasErrorHandler() {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureLeadingSlash normalises a residual mount path so it always begins with
+// a single leading slash ("" and "x" both become "/x", "/x" is unchanged).
+func ensureLeadingSlash(p string) string {
+	if p == "" {
+		return "/"
+	}
+	if p[0] != '/' {
+		return "/" + p
+	}
+	return p
+}
+
+// asError converts a recovered panic value into an error for the error chain.
+func asError(rec any) error {
+	if err, ok := rec.(error); ok {
+		return err
+	}
+	return fmt.Errorf("%v", rec)
+}
+
+// methodMatches reports whether a layer registered for layerMethod should run
+// for a request using reqMethod.
+//
+// The comparison is case-insensitive, and a HEAD request falls through to a GET
+// route when no HEAD route matched first. That fallback mirrors Express's
+// Route#_handles_method, which rewrites "head" to "get" when the route defines
+// no explicit HEAD handler, and is what makes HEAD requests return the headers
+// of the corresponding GET response instead of a 404.
+func methodMatches(layerMethod, reqMethod string) bool {
+	if strings.EqualFold(layerMethod, reqMethod) {
+		return true
+	}
+	return strings.EqualFold(reqMethod, "HEAD") && strings.EqualFold(layerMethod, "GET")
 }
 
 // invokeWithParams runs any pending app.Param callbacks for the matched layer's
@@ -374,6 +474,9 @@ func compilePattern(path string, prefix, caseSensitive, strict bool) *pathPatter
 
 	var frags []string
 	i := 0
+	// Express 4 (path-to-regexp@0.1.x) names an unnamed wildcard group by its
+	// positional index — "0", "1", … — independent of the named parameters.
+	starIndex := 0
 	for i < len(path) {
 		c := path[i]
 		switch c {
@@ -423,7 +526,8 @@ func compilePattern(path string, prefix, caseSensitive, strict bool) *pathPatter
 			p.keys = append(p.keys, name)
 			i = j
 		case '*':
-			p.keys = append(p.keys, "*")
+			p.keys = append(p.keys, strconv.Itoa(starIndex))
+			starIndex++
 			frags = append(frags, "(.*)")
 			i++
 		case '/':
@@ -457,19 +561,27 @@ func compilePattern(path string, prefix, caseSensitive, strict bool) *pathPatter
 // match returns the captured params, the unmatched remainder (for prefix
 // patterns), and whether the path matched.
 func (p *pathPattern) match(path string) (map[string]string, string, bool) {
-	m := p.re.FindStringSubmatch(path)
-	if m == nil {
+	loc := p.re.FindStringSubmatchIndex(path)
+	if loc == nil {
 		return nil, "", false
 	}
 	params := make(map[string]string, len(p.keys))
 	for i, k := range p.keys {
-		if i+1 < len(m) {
-			params[k] = m[i+1]
+		s, e := loc[2*(i+1)], loc[2*(i+1)+1]
+		if s < 0 {
+			// A non-participating group (an absent optional parameter). Express
+			// leaves such a parameter undefined rather than present-but-empty, so
+			// the key is omitted entirely.
+			continue
 		}
+		params[k] = path[s:e]
 	}
 	residual := ""
-	if p.prefix && p.residualIdx > 0 && p.residualIdx < len(m) {
-		residual = m[p.residualIdx]
+	if p.prefix && p.residualIdx > 0 && 2*p.residualIdx+1 < len(loc) {
+		s, e := loc[2*p.residualIdx], loc[2*p.residualIdx+1]
+		if s >= 0 {
+			residual = path[s:e]
+		}
 	}
 	return params, residual, true
 }

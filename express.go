@@ -1,7 +1,9 @@
 package express
 
 import (
+	"html"
 	"net/http"
+	"strings"
 )
 
 // Application is the top-level express app. It embeds a Router so every
@@ -47,6 +49,11 @@ func New() *Application {
 	app.settings["view engine"] = "html"
 	// Express enables the view cache by default outside development.
 	app.settings["view cache"] = false
+	// Forwarding headers (X-Forwarded-For / -Proto / -Host) are attacker
+	// controlled unless a trusted proxy terminates the connection, so, exactly
+	// as in Express, they are ignored until the operator opts in with
+	// app.Enable("trust proxy"). See Request.IP and Request.Protocol.
+	app.settings["trust proxy"] = false
 	// Register the built-in html/template engine (cache-aware).
 	app.Engine(".html", app.htmlTemplateEngine)
 	app.Engine(".tmpl", app.htmlTemplateEngine)
@@ -54,8 +61,21 @@ func New() *Application {
 }
 
 // Set assigns a setting name to a value, returning the app for chaining.
+//
+// The two routing settings Express reads lazily when it builds its router —
+// "strict routing" and "case sensitive routing" — are wired straight through to
+// the application's root router, so routes registered after the setting honour
+// it (Express itself only reads them once, at first route registration).
 func (app *Application) Set(name string, value any) *Application {
 	app.settings[name] = value
+	if b, ok := value.(bool); ok {
+		switch name {
+		case "strict routing":
+			app.Router.opts.Strict = b
+		case "case sensitive routing":
+			app.Router.opts.CaseSensitive = b
+		}
+	}
 	return app
 }
 
@@ -88,6 +108,7 @@ func (app *Application) Locals() map[string]any { return app.locals }
 // net/http server, httptest, or wrapped by other middleware.
 func (app *Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req := newRequest(r, app)
+	req.errHandlers = app.Router.hasErrorHandler()
 	res := newResponse(w, req, app)
 	app.Router.handle(req, res, func(err ...error) {
 		// Final fall-through handler: unmatched route or unhandled error.
@@ -96,9 +117,26 @@ func (app *Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !res.written {
-			res.Status(http.StatusNotFound).Send("Cannot " + req.Method() + " " + req.Path())
+			res.defaultNotFound(req.Method(), req.Path())
 		}
 	})
+}
+
+// defaultNotFound renders the framework's own unmatched-route response, matching
+// Express's finalhandler: an HTML error page with a Content-Security-Policy that
+// forbids loading any subresource and X-Content-Type-Options: nosniff, so the
+// echoed method/path can never be interpreted as active content.
+func (res *Response) defaultNotFound(method, path string) {
+	msg := "Cannot " + method + " " + path
+	body := "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>" +
+		html.EscapeString(msg) + "</pre>\n</body>\n</html>\n"
+	res.Set("Content-Security-Policy", "default-src 'none'")
+	res.Set("X-Content-Type-Options", "nosniff")
+	res.Status(http.StatusNotFound).Type("html")
+	res.writeHeaderOnce()
+	if !strings.EqualFold(method, "HEAD") {
+		_, _ = res.Writer.Write([]byte(body))
+	}
 }
 
 // Listen binds and listens for connections on the given address, e.g. ":3000".

@@ -1,7 +1,6 @@
 package express
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -11,26 +10,27 @@ import (
 // JSON response. The body is prefixed with `/**/` and the content type is set to
 // application/javascript, mirroring Express's res.jsonp.
 func (res *Response) JSONP(v any) *Response {
-	cb := res.req.Query("callback")
-	if cb == "" {
-		return res.JSON(v)
-	}
-	// Restrict the callback name to a safe identifier to avoid script injection.
-	cb = expressSanitizeCallback(cb)
-	if cb == "" {
-		return res.JSON(v)
-	}
-	b, err := json.Marshal(v)
+	b, err := marshalJSON(v)
 	if err != nil {
 		b = []byte("null")
 	}
 	// Escape line separators that are valid in JSON but not in JavaScript.
 	body := strings.NewReplacer("\u2028", "\\u2028", "\u2029", "\\u2029").Replace(string(b))
+
+	// Like Express: even without a callback, jsonp advertises the response as
+	// application/json and pins nosniff so a browser cannot re-interpret it.
 	if res.GetHeader("Content-Type") == "" {
-		res.Type("application/javascript")
+		res.Set("X-Content-Type-Options", "nosniff")
+		res.Type("json")
 	}
-	res.Set("X-Content-Type-Options", "nosniff")
-	return res.Send("/**/ typeof " + cb + " === 'function' && " + cb + "(" + body + ");")
+
+	cb := expressSanitizeCallback(res.req.Query("callback"))
+	if cb != "" {
+		res.Set("X-Content-Type-Options", "nosniff")
+		res.Type("text/javascript")
+		body = "/**/ typeof " + cb + " === 'function' && " + cb + "(" + body + ");"
+	}
+	return res.Send(body)
 }
 
 // expressSanitizeCallback returns name if it is a safe JavaScript callback

@@ -3,6 +3,7 @@ package express
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,6 +30,13 @@ type Request struct {
 	// paramDone tracks which route parameters have had their app.Param
 	// callbacks run, so each runs at most once per request.
 	paramDone map[string]bool
+
+	// errHandlers records whether the application's router tree contains any
+	// error-handling middleware. When it does, a panic raised inside a handler
+	// is caught and routed to that middleware (as Express does with a thrown
+	// error); when it does not, the panic is left to propagate so Go
+	// recover-based middleware can handle it.
+	errHandlers bool
 }
 
 func newRequest(r *http.Request, app *Application) *Request {
@@ -36,7 +44,7 @@ func newRequest(r *http.Request, app *Application) *Request {
 		Raw:       r,
 		app:       app,
 		params:    make(map[string]string),
-		path:      cleanPath(r.URL.Path),
+		path:      cleanPath(r.URL.EscapedPath()),
 		values:    make(map[string]any),
 		paramDone: make(map[string]bool),
 	}
@@ -84,7 +92,17 @@ func (req *Request) mergeParams(params map[string]string) {
 func (req *Request) Method() string { return req.Raw.Method }
 
 // Path returns the request URL path (without query string).
-func (req *Request) Path() string { return req.Raw.URL.Path }
+//
+// Like Express's req.path this is the path *relative to the current mount
+// point*: inside a router mounted at "/api" or middleware used at "/pfx", it is
+// the residual portion after the prefix, not the full original path (which is
+// available via OriginalURL).
+func (req *Request) Path() string {
+	if req.path != "" {
+		return req.path
+	}
+	return req.Raw.URL.Path
+}
 
 // SetPath rewrites the request path and, crucially, the path used by the
 // router to match routes. Middleware that rewrites URLs (rewrite, basepath,
@@ -100,9 +118,61 @@ func (req *Request) SetPath(p string) {
 // OriginalURL returns the full request URI as received.
 func (req *Request) OriginalURL() string { return req.Raw.URL.RequestURI() }
 
+// URL returns the request URL relative to the current mount point — the routing
+// path (residual inside a mount) together with the original query string. It is
+// the analogue of Express's req.url, which is rewritten to the residual as the
+// request descends into mounted routers while retaining the query.
+func (req *Request) URL() string {
+	p := req.Path()
+	if q := req.Raw.URL.RawQuery; q != "" {
+		return p + "?" + q
+	}
+	return p
+}
+
+// TrustProxy reports whether the app has enabled the "trust proxy" setting.
+//
+// Like Express, the setting is DISABLED by default: forwarding headers such as
+// X-Forwarded-For and X-Forwarded-Proto are attacker-controlled on a directly
+// exposed server, so IP, Protocol, Secure and Hostname ignore them until the
+// operator declares that a trusted proxy sits in front of the app with
+//
+//	app.Enable("trust proxy")
+func (req *Request) TrustProxy() bool {
+	return req.app != nil && req.app.Enabled("trust proxy")
+}
+
 // Hostname returns the host portion of the request, honoring the Host header.
+// The port is removed and an IPv6 literal is unwrapped from its brackets, so
+// "[::1]:8080" yields "::1". When "trust proxy" is enabled a non-empty
+// X-Forwarded-Host header takes precedence (its first entry, as in Express).
 func (req *Request) Hostname() string {
 	h := req.Raw.Host
+	if req.TrustProxy() {
+		if fwd := req.Raw.Header.Get("X-Forwarded-Host"); fwd != "" {
+			h = strings.TrimSpace(strings.Split(fwd, ",")[0])
+		}
+	}
+	return stripHostPort(h)
+}
+
+// stripHostPort removes a trailing ":port" from a host value and unwraps a
+// bracketed IPv6 literal. A bare IPv6 address (which contains several colons and
+// no brackets) is returned unchanged rather than truncated at its first colon.
+func stripHostPort(h string) string {
+	if h == "" {
+		return h
+	}
+	if h[0] == '[' {
+		if end := strings.IndexByte(h, ']'); end >= 0 {
+			return h[1:end]
+		}
+		return h
+	}
+	// More than one colon and no brackets means a bare IPv6 literal: no port.
+	if strings.Count(h, ":") > 1 {
+		return h
+	}
 	if i := strings.IndexByte(h, ':'); i >= 0 {
 		return h[:i]
 	}
@@ -110,12 +180,19 @@ func (req *Request) Hostname() string {
 }
 
 // Protocol returns "https" when the request arrived over TLS, else "http".
+//
+// The X-Forwarded-Proto header is consulted only when "trust proxy" is enabled;
+// otherwise any client could claim to be on HTTPS and defeat middleware that
+// keys off Secure. When the header carries a comma-separated list the first
+// (client-most) entry wins, matching Express.
 func (req *Request) Protocol() string {
 	if req.Raw.TLS != nil {
 		return "https"
 	}
-	if p := req.Raw.Header.Get("X-Forwarded-Proto"); p != "" {
-		return p
+	if req.TrustProxy() {
+		if p := req.Raw.Header.Get("X-Forwarded-Proto"); p != "" {
+			return strings.ToLower(strings.TrimSpace(strings.Split(p, ",")[0]))
+		}
 	}
 	return "http"
 }
@@ -123,16 +200,61 @@ func (req *Request) Protocol() string {
 // Secure reports whether the request was made over a secure connection.
 func (req *Request) Secure() bool { return req.Protocol() == "https" }
 
-// IP returns the remote address of the request.
+// IP returns the client address of the request.
+//
+// By default this is the address of the socket peer, with any port removed —
+// the only value the server actually observed. The X-Forwarded-For header is
+// honoured (its left-most, client-most entry) only when "trust proxy" is
+// enabled, because on a directly exposed server that header is set by the
+// client and would let anyone forge the address that IP-keyed rate limiting,
+// allow lists and audit logs depend on. Behind a proxy, either enable "trust
+// proxy" or put the realip middleware in front, which rewrites RemoteAddr after
+// validating the hop chain.
 func (req *Request) IP() string {
-	if f := req.Raw.Header.Get("X-Forwarded-For"); f != "" {
-		return strings.TrimSpace(strings.Split(f, ",")[0])
+	if req.TrustProxy() {
+		if f := req.Raw.Header.Get("X-Forwarded-For"); f != "" {
+			if first := strings.TrimSpace(strings.Split(f, ",")[0]); first != "" {
+				return first
+			}
+		}
 	}
-	host := req.Raw.RemoteAddr
-	if i := strings.LastIndexByte(host, ':'); i >= 0 {
-		return host[:i]
+	return remoteHost(req.Raw.RemoteAddr)
+}
+
+// IPs returns the addresses in the X-Forwarded-For header, left to right
+// (client first, nearest proxy last), mirroring Express's req.ips. It returns
+// nil unless "trust proxy" is enabled, since the header is otherwise untrusted.
+func (req *Request) IPs() []string {
+	if !req.TrustProxy() {
+		return nil
 	}
-	return host
+	f := req.Raw.Header.Get("X-Forwarded-For")
+	if f == "" {
+		return nil
+	}
+	parts := strings.Split(f, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// remoteHost strips the port from an http.Request.RemoteAddr value, handling
+// "1.2.3.4:80", "[::1]:80", a bracketless IPv6 literal, and a bare host.
+func remoteHost(addr string) string {
+	if addr == "" {
+		return addr
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return stripHostPort(addr)
 }
 
 // Params returns a captured route parameter by name, or "" if absent.

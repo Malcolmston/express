@@ -1,14 +1,19 @@
 package express
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/malcolmston/express/encodeurl"
+	"github.com/malcolmston/express/etag"
+	"github.com/malcolmston/express/statuses"
 )
 
 // Response wraps an http.ResponseWriter and provides chainable Express-style
@@ -35,6 +40,12 @@ type Response struct {
 	// headers are committed. Middleware such as Session uses this to flush a
 	// Set-Cookie header before the status line is written.
 	beforeWrite []func()
+
+	// next is the continuation for the handler currently executing. Response
+	// helpers that must delegate to the middleware chain — notably res.Format
+	// when nothing is acceptable — call it with an error. It is refreshed by the
+	// router before each handler runs.
+	next Next
 }
 
 // OnBeforeWrite registers a callback invoked once, immediately before the
@@ -145,8 +156,9 @@ func (res *Response) Send(body any) *Response {
 		if res.GetHeader("Content-Type") == "" {
 			res.Type("html")
 		}
+		suppress := res.applyETag([]byte(v))
 		res.writeHeaderOnce()
-		if res.invalidStatus {
+		if res.invalidStatus || suppress {
 			return res
 		}
 		_, _ = res.Writer.Write([]byte(v))
@@ -154,8 +166,9 @@ func (res *Response) Send(body any) *Response {
 		if res.GetHeader("Content-Type") == "" {
 			res.Type("application/octet-stream")
 		}
+		suppress := res.applyETag(v)
 		res.writeHeaderOnce()
-		if res.invalidStatus {
+		if res.invalidStatus || suppress {
 			return res
 		}
 		_, _ = res.Writer.Write(v)
@@ -172,23 +185,60 @@ func (res *Response) JSON(v any) *Response {
 	if res.GetHeader("Content-Type") == "" {
 		res.Type("json")
 	}
-	data, err := json.Marshal(v)
+	data, err := marshalJSON(v)
 	if err != nil {
 		res.finalError(err)
 		return res
 	}
+	suppress := res.applyETag(data)
 	res.writeHeaderOnce()
-	if res.invalidStatus {
+	if res.invalidStatus || suppress {
 		return res
 	}
 	_, _ = res.Writer.Write(data)
 	return res
 }
 
+// applyETag mirrors the ETag + freshness handling Express performs inside
+// res.send/res.json: for a GET or HEAD request it derives a default weak ETag
+// from the body (unless one was set explicitly), then — if the request is fresh
+// against that validator (If-None-Match / If-Modified-Since) — downgrades the
+// response to a bodyless 304 Not Modified. It returns true when the caller must
+// suppress the body.
+func (res *Response) applyETag(body []byte) bool {
+	if res.req == nil {
+		return false
+	}
+	m := res.req.Method()
+	isGetHead := strings.EqualFold(m, "GET") || strings.EqualFold(m, "HEAD")
+	if !isGetHead {
+		return false
+	}
+	if res.GetHeader("ETag") == "" && len(body) > 0 {
+		res.Set("ETag", etag.Generate(body, true))
+	}
+	if res.statusCode == http.StatusOK && res.req.Fresh(res) {
+		res.statusCode = http.StatusNotModified
+		h := res.Writer.Header()
+		h.Del("Content-Type")
+		h.Del("Content-Length")
+		return true
+	}
+	return false
+}
+
 // SendStatus sets the status code and sends its standard text as the body.
+//
+// The body text comes from the `statuses` message table (Express uses the same
+// `statuses` module), which differs from net/http.StatusText in casing for a
+// few codes — e.g. 418 is "I'm a Teapot", not "I'm a teapot".
 func (res *Response) SendStatus(code int) *Response {
 	res.Status(code)
-	return res.Type("text").Send(http.StatusText(code))
+	body := statuses.Message(code)
+	if body == "" {
+		body = strconv.Itoa(code)
+	}
+	return res.Type("text").Send(body)
 }
 
 // End finalizes the response with no (further) body.
@@ -198,6 +248,13 @@ func (res *Response) End() {
 
 // Redirect sends a redirect response. If a status code is provided it is used;
 // otherwise 302 Found is assumed.
+//
+// Like Express's res.redirect the body is negotiated from the request's Accept
+// header: clients that prefer HTML get an escaped anchor, everything else gets
+// plain text. The Content-Type is always set explicitly, which matters because
+// the destination URL is echoed into the body — leaving it unset would let
+// net/http sniff a redirect to "<script>…" as text/html and turn an open
+// redirect into a script-injection sink.
 func (res *Response) Redirect(args ...any) *Response {
 	code := http.StatusFound
 	var location string
@@ -215,29 +272,120 @@ func (res *Response) Redirect(args ...any) *Response {
 	}
 	res.Location(location)
 	res.Status(code)
+
+	// res.redirect negotiates the courtesy body through res.format, which always
+	// adds "Vary: Accept". The body text is prefixed with the status phrase, e.g.
+	// "Found. Redirecting to /target".
+	res.Vary("Accept")
+	phrase := statuses.Message(code)
+	encoded := res.GetHeader("Location")
+	body := phrase + ". Redirecting to " + encoded
+	if res.GetHeader("Content-Type") == "" {
+		// Offer order matches Express's res.redirect (text first, then html), so
+		// a client that expresses no preference gets the plain-text body.
+		if res.req != nil && res.req.Accepts("text", "html") == "html" {
+			esc := html.EscapeString(encoded)
+			body = "<p>" + phrase + ` Redirecting to <a href="` + esc + `">` + esc + `</a></p>`
+			res.Type("html")
+		} else {
+			res.Type("text")
+		}
+	}
+
 	res.writeHeaderOnce()
 	if res.invalidStatus {
 		return res
 	}
-	_, _ = res.Writer.Write([]byte("Redirecting to " + location))
+	// A HEAD response must not carry a body.
+	if res.req != nil && strings.EqualFold(res.req.Method(), "HEAD") {
+		return res
+	}
+	_, _ = res.Writer.Write([]byte(body))
 	return res
 }
 
 // Cookie sets a Set-Cookie header. opts may be nil for a session cookie.
+//
+// The serialization mirrors Express (the `cookie` module): attributes are
+// emitted in the order Max-Age, Domain, Path, Expires, HttpOnly, Secure,
+// SameSite, and — as Express does — a non-zero MaxAge additionally sets an
+// Expires derived from it.
 func (res *Response) Cookie(name, value string, opts *CookieOptions) *Response {
-	c := &http.Cookie{Name: name, Value: url.QueryEscape(value), Path: "/"}
+	sc := setCookie{name: name, value: url.QueryEscape(value), path: "/"}
 	if opts != nil {
-		opts.apply(c)
+		if opts.Path != "" {
+			sc.path = opts.Path
+		}
+		sc.domain = opts.Domain
+		if opts.MaxAge != 0 {
+			sc.maxAge, sc.hasMaxAge = opts.MaxAge, true
+			sc.expires, sc.hasExpires = time.Now().Add(time.Duration(opts.MaxAge)*time.Second), true
+		}
+		sc.httpOnly = opts.HTTPOnly
+		sc.secure = opts.Secure
+		sc.sameSite = opts.SameSite
 	}
-	http.SetCookie(res.Writer, c)
+	res.Append("Set-Cookie", sc.serialize())
 	return res
 }
 
-// ClearCookie expires a cookie on the client.
+// ClearCookie expires a cookie on the client. Like Express it sends an Expires
+// in the past (the Unix epoch) rather than Max-Age=0.
 func (res *Response) ClearCookie(name string) *Response {
-	c := &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1}
-	http.SetCookie(res.Writer, c)
+	sc := setCookie{name: name, value: "", path: "/", expires: time.Unix(0, 0), hasExpires: true}
+	res.Append("Set-Cookie", sc.serialize())
 	return res
+}
+
+// setCookie assembles a Set-Cookie header value in Express's attribute order.
+type setCookie struct {
+	name, value   string
+	path, domain  string
+	maxAge        int
+	hasMaxAge     bool
+	expires       time.Time
+	hasExpires    bool
+	httpOnly      bool
+	secure        bool
+	sameSite      http.SameSite
+}
+
+func (sc setCookie) serialize() string {
+	var b strings.Builder
+	b.WriteString(sc.name)
+	b.WriteByte('=')
+	b.WriteString(sc.value)
+	if sc.hasMaxAge {
+		b.WriteString("; Max-Age=")
+		b.WriteString(strconv.Itoa(sc.maxAge))
+	}
+	if sc.domain != "" {
+		b.WriteString("; Domain=")
+		b.WriteString(sc.domain)
+	}
+	if sc.path != "" {
+		b.WriteString("; Path=")
+		b.WriteString(sc.path)
+	}
+	if sc.hasExpires {
+		b.WriteString("; Expires=")
+		b.WriteString(sc.expires.UTC().Format(http.TimeFormat))
+	}
+	if sc.httpOnly {
+		b.WriteString("; HttpOnly")
+	}
+	if sc.secure {
+		b.WriteString("; Secure")
+	}
+	switch sc.sameSite {
+	case http.SameSiteLaxMode:
+		b.WriteString("; SameSite=Lax")
+	case http.SameSiteStrictMode:
+		b.WriteString("; SameSite=Strict")
+	case http.SameSiteNoneMode:
+		b.WriteString("; SameSite=None")
+	}
+	return b.String()
 }
 
 // CookieOptions configures a cookie set via res.Cookie.
@@ -248,17 +396,6 @@ type CookieOptions struct {
 	Secure   bool
 	HTTPOnly bool
 	SameSite http.SameSite
-}
-
-func (o *CookieOptions) apply(c *http.Cookie) {
-	if o.Path != "" {
-		c.Path = o.Path
-	}
-	c.Domain = o.Domain
-	c.MaxAge = o.MaxAge
-	c.Secure = o.Secure
-	c.HttpOnly = o.HTTPOnly
-	c.SameSite = o.SameSite
 }
 
 // Written reports whether the response headers have been committed.
@@ -277,8 +414,10 @@ func (res *Response) finalError(err error) {
 
 func normalizeContentType(t string) string {
 	if strings.Contains(t, "/") {
-		if strings.HasPrefix(t, "text/") && !strings.Contains(t, "charset") {
-			return t + "; charset=utf-8"
+		if !strings.Contains(strings.ToLower(t), "charset") {
+			if cs := mimeCharset(t); cs != "" {
+				return t + "; charset=" + cs
+			}
 		}
 		return t
 	}
@@ -352,6 +491,54 @@ func extContentType(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// marshalJSON serialises v the way Express's res.json does — via the equivalent
+// of JSON.stringify, which does NOT escape the HTML-sensitive bytes <, > and &.
+// Go's encoding/json escapes them to </>/& by default, which would
+// make an otherwise identical body differ from upstream, so HTML escaping is
+// disabled here. Any escaping needed for safety is the caller's responsibility
+// (e.g. res.jsonp pins X-Content-Type-Options: nosniff).
+func marshalJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	// Encoder.Encode appends a trailing newline; drop it to match json.Marshal.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// mimeCharset mirrors the `mime-types` charset() lookup that Express's res.set
+// applies to a Content-Type: text/* types and the handful of application/*
+// types the mime database marks as UTF-8 carry an explicit charset. It returns
+// "utf-8" for those and "" otherwise. The input may include parameters
+// ("application/json; foo=bar"); only the media type is examined.
+func mimeCharset(ct string) string {
+	base := ct
+	if i := strings.IndexByte(base, ';'); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.ToLower(strings.TrimSpace(base))
+	if strings.HasPrefix(base, "text/") {
+		return "utf-8"
+	}
+	switch base {
+	case "application/json",
+		"application/javascript",
+		"application/xml",
+		"application/rss+xml",
+		"application/manifest+json",
+		"application/ld+json",
+		"application/x-www-form-urlencoded":
+		return "utf-8"
+	}
+	if strings.HasPrefix(base, "application/") &&
+		(strings.HasSuffix(base, "+json") || strings.HasSuffix(base, "+xml")) {
+		return "utf-8"
+	}
+	return ""
 }
 
 // itoa is a tiny helper to avoid importing strconv at call sites.

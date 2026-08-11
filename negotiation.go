@@ -1,9 +1,12 @@
 package express
 
 import (
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/malcolmston/express/httperrors"
 )
 
 // Accepts returns the best match among the offered types for the request's
@@ -15,9 +18,11 @@ func (req *Request) Accepts(offers ...string) string {
 }
 
 // AcceptsLanguages returns the best match among the offered languages for the
-// Accept-Language header, or "".
+// Accept-Language header, or "". Matching honours language ranges: an offer of
+// "en" satisfies an Accept-Language of "en-GB" (and vice versa), mirroring the
+// negotiator prefix rules Express uses.
 func (req *Request) AcceptsLanguages(offers ...string) string {
-	return negotiate(req.Get("Accept-Language"), offers, func(s string) string { return s })
+	return negotiateWith(req.Get("Accept-Language"), offers, languageMatches)
 }
 
 // AcceptsCharsets returns the best match among the offered charsets for the
@@ -27,9 +32,116 @@ func (req *Request) AcceptsCharsets(offers ...string) string {
 }
 
 // AcceptsEncodings returns the best match among the offered encodings for the
-// Accept-Encoding header, or "".
+// Accept-Encoding header, or "". As in Express, "identity" is always implicitly
+// acceptable (unless explicitly rejected), and — unlike the other Accept
+// families — an absent header does not make every offer acceptable: only
+// identity is, so acceptsEncodings("gzip","identity") is "identity" with no
+// Accept-Encoding present.
 func (req *Request) AcceptsEncodings(offers ...string) string {
-	return negotiate(req.Get("Accept-Encoding"), offers, func(s string) string { return s })
+	return negotiateEncoding(req.Get("Accept-Encoding"), offers)
+}
+
+// languageMatches reports whether an Accept-Language entry matches an offered
+// language, honouring prefix ranges ("en-GB" ~ "en") and the "*" wildcard.
+func languageMatches(accept, offer string) bool {
+	accept = strings.ToLower(accept)
+	offer = strings.ToLower(offer)
+	if accept == "*" || accept == offer {
+		return true
+	}
+	aPrefix := accept
+	if i := strings.IndexByte(accept, '-'); i >= 0 {
+		aPrefix = accept[:i]
+	}
+	oPrefix := offer
+	if i := strings.IndexByte(offer, '-'); i >= 0 {
+		oPrefix = offer[:i]
+	}
+	return aPrefix == offer || accept == oPrefix
+}
+
+// negotiateWith is negotiate with a caller-supplied matcher and an identity
+// resolver (the offer is compared to Accept entries directly). With no header it
+// returns the first offer.
+func negotiateWith(header string, offers []string, matches func(accept, offer string) bool) string {
+	items := parseAccept(header)
+	if len(offers) == 0 {
+		for _, it := range items {
+			if it.q > 0 {
+				return it.value
+			}
+		}
+		return ""
+	}
+	if header == "" {
+		return offers[0]
+	}
+	best := ""
+	bestQ := 0.0
+	bestIdx := 1 << 30
+	for oi, offer := range offers {
+		for _, it := range items {
+			if it.q <= 0 {
+				continue
+			}
+			if matches(it.value, offer) && (it.q > bestQ || (it.q == bestQ && oi < bestIdx)) {
+				best = offer
+				bestQ = it.q
+				bestIdx = oi
+			}
+		}
+	}
+	return best
+}
+
+// negotiateEncoding selects the best Accept-Encoding offer, treating identity as
+// implicitly acceptable at the header's minimum quality unless a "*" or an
+// explicit identity entry is present.
+func negotiateEncoding(header string, offers []string) string {
+	items := parseAccept(header)
+	hasIdentity, hasStar := false, false
+	minQ := 1.0
+	for _, it := range items {
+		switch it.value {
+		case "identity":
+			hasIdentity = true
+		case "*":
+			hasStar = true
+		}
+		if it.q < minQ {
+			minQ = it.q
+		}
+	}
+	qOf := func(enc string) (float64, bool) {
+		enc = strings.ToLower(enc)
+		best := -1.0
+		for _, it := range items {
+			if it.q <= 0 {
+				continue
+			}
+			if it.value == enc || it.value == "*" {
+				if it.q > best {
+					best = it.q
+				}
+			}
+		}
+		if enc == "identity" && !hasIdentity && !hasStar && best < 0 {
+			best = minQ // identity is implicitly acceptable
+		}
+		if best <= 0 {
+			return 0, false
+		}
+		return best, true
+	}
+	bestOffer := ""
+	bestQ := 0.0
+	for _, offer := range offers {
+		if q, ok := qOf(offer); ok && q > bestQ {
+			bestOffer = offer
+			bestQ = q
+		}
+	}
+	return bestOffer
 }
 
 // acceptItem is one entry of an Accept-style header with its quality weight.
@@ -161,12 +273,24 @@ func (res *Response) Format(handlers map[string]func()) {
 
 	if best := res.req.Accepts(offers...); best != "" {
 		if fn, ok := handlers[best]; ok {
+			// Express sets the response Content-Type to the negotiated type
+			// before running the branch, so a branch that just sends a string
+			// inherits e.g. text/plain rather than the text/html default.
+			res.Type(best)
 			fn()
 			return
 		}
 	}
 	if fn, ok := handlers["default"]; ok {
 		fn()
+		return
+	}
+	// Nothing is acceptable and there is no default: Express hands a 406 error to
+	// the middleware chain (next(NotAcceptableError)) rather than answering the
+	// 406 itself, so an application error handler can shape the response.
+	err := httperrors.New(http.StatusNotAcceptable, "Not Acceptable")
+	if res.next != nil {
+		res.next(err)
 		return
 	}
 	res.Status(406).Send("Not Acceptable")

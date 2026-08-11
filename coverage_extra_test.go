@@ -105,6 +105,8 @@ func TestRequestAccessors(t *testing.T) {
 
 func TestRequestProtocolAndSecure(t *testing.T) {
 	app := New()
+	// X-Forwarded-Proto is only honoured behind a declared proxy, as in Express.
+	app.Enable("trust proxy")
 	var proto string
 	var secure bool
 	app.Get("/", func(req *Request, res *Response, next Next) {
@@ -124,6 +126,7 @@ func TestRequestProtocolAndSecure(t *testing.T) {
 
 func TestRequestIPForwardedFor(t *testing.T) {
 	app := New()
+	app.Enable("trust proxy")
 	var ip string
 	app.Get("/", func(req *Request, res *Response, next Next) { ip = req.IP(); res.Send("ok") })
 	r := httptest.NewRequest("GET", "/", nil)
@@ -367,7 +370,9 @@ func TestResponseCookieAndClearCookie(t *testing.T) {
 		t.Fatalf("nil opts cookie = %q", w2.Header().Get("Set-Cookie"))
 	}
 	w3 := do(app, "GET", "/clear", "")
-	if !strings.Contains(w3.Header().Get("Set-Cookie"), "Max-Age=0") {
+	// Like Express, clearing a cookie expires it via a past Expires date rather
+	// than Max-Age=0.
+	if !strings.Contains(w3.Header().Get("Set-Cookie"), "Expires=") {
 		t.Fatalf("clear cookie = %q", w3.Header().Get("Set-Cookie"))
 	}
 }
@@ -480,7 +485,8 @@ func TestRouteAllMethod(t *testing.T) {
 func TestWildcardRoute(t *testing.T) {
 	app := New()
 	app.Get("/files/*", func(req *Request, res *Response, next Next) {
-		res.Send(req.Params("*"))
+		// Express 4 keys an unnamed wildcard by its positional index ("0").
+		res.Send(req.Params("0"))
 	})
 	if b := do(app, "GET", "/files/a/b/c.txt", "").Body.String(); b != "a/b/c.txt" {
 		t.Fatalf("wildcard = %q", b)
@@ -540,8 +546,11 @@ func TestJSONMiddlewareNonJSONPassthrough(t *testing.T) {
 	app := New()
 	app.Use(JSON())
 	app.Post("/", func(req *Request, res *Response, next Next) {
-		if req.Body() != nil {
-			t.Errorf("body should be nil for non-json")
+		// Like express.json(), a non-JSON request is left with an empty-object
+		// body rather than a nil one.
+		m, ok := req.Body().(map[string]any)
+		if !ok || len(m) != 0 {
+			t.Errorf("body should be an empty object for non-json, got %#v", req.Body())
 		}
 		res.Send("ok")
 	})
@@ -555,8 +564,10 @@ func TestURLEncodedMiddleware(t *testing.T) {
 	app := New()
 	app.Use(URLEncoded())
 	app.Post("/", func(req *Request, res *Response, next Next) {
-		vals, _ := req.Body().(interface{ Get(string) string })
-		res.Send(vals.Get("name"))
+		// express.urlencoded() yields a map[string]any of strings/[]any.
+		vals, _ := req.Body().(map[string]any)
+		name, _ := vals["name"].(string)
+		res.Send(name)
 	})
 	r := httptest.NewRequest("POST", "/", strings.NewReader("name=bob&age=5"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -571,8 +582,10 @@ func TestURLEncodedPassthrough(t *testing.T) {
 	app := New()
 	app.Use(URLEncoded())
 	app.Post("/", func(req *Request, res *Response, next Next) {
-		if req.Body() != nil {
-			t.Error("body should be nil")
+		// A non-urlencoded request is left with an empty-object body.
+		m, ok := req.Body().(map[string]any)
+		if !ok || len(m) != 0 {
+			t.Errorf("body should be an empty object, got %#v", req.Body())
 		}
 		res.Send("ok")
 	})
