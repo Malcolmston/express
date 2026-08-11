@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-11
+### Security
+- **`sanitizehtml`: URL schemes are now validated (high).** `Sanitize` performed no
+  scheme checking on any attribute, so `javascript:` and `data:text/html` URLs
+  survived wherever the caller allowed a URL-bearing attribute — including
+  `href`. Upstream `sanitize-html` filters every URL attribute against
+  `allowedSchemes`. The port now carries upstream's full
+  `allowedSchemes`/`allowedSchemesByTag`/`allowedSchemesAppliedToAttributes`
+  model across all nineteen URL attributes, with `imagesrcset` srcset-filtered.
+  The zero-value `Options{}` policy allowed no tags and was unaffected, but
+  allowing `a[href]` is the canonical use and is what upstream permits by default.
+- **`jsonwebtoken`: an empty HMAC secret is refused.** `Verify` accepted a token
+  forged with a zero-length key and `Sign` would mint one, so a deployment whose
+  secret resolved to empty (unset env var, missing secrets-manager key) silently
+  accepted tokens anyone could forge. Both now return `ErrMissingKey`.
+- **`semver`: an unparseable range is an error.** `ParseRange` degraded an
+  unrecognised field to a wildcard, so a bogus constraint silently behaved as a
+  permissive `0.x` range instead of failing. Version gates on wrong or
+  externally-supplied input no longer pass silently.
+- **`contenttype`: CR/LF/HTAB/NUL rejected in quoted parameter values.** The
+  quoted-string class admitted them, so `charset="utf-8\r\nX-Injected: 1"`
+  parsed and handed back a CRLF-bearing value — a header-splitting primitive if
+  echoed into a response. Both parse and format now match upstream's grammar.
+- **`req.Secure()` honours `X-Forwarded-Proto` only when `trust proxy` is
+  enabled**, matching Express. Previously a client hitting a directly exposed
+  server could spoof `https` and bypass `middleware/forcessl`.
+
+### Changed
+- Measured cross-language parity against `express@4.21.2` raised from 66.8% to
+  98.9% (182/184 cases), plus 28 nested package ports each measured against their
+  own upstream and now at 100% of compared cases. See `parity/express/`.
+- Body, response, negotiation, conditional-request, static and routing behaviour
+  brought in line with upstream on 59 previously-divergent cases.
+
+### Breaking
+- A `javascript:`/`data:` URL that previously survived `sanitizehtml` is now
+  dropped; an empty JWT secret, an unparseable semver range, and a CRLF-bearing
+  Content-Type parameter now error instead of being accepted. Each is the
+  intended effect of the security fixes above.
+- `req.Secure()`/`req.Protocol()` ignore `X-Forwarded-Proto` unless the app calls
+  `app.Enable("trust proxy")`. Behind a proxy, enable that setting.
+
 ## [0.4.0] - 2026-07-18
 ### Added
 - **Production middleware suite** (root package): `CORS`, `SecurityHeaders`
