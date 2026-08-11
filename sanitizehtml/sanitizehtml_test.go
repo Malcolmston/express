@@ -105,10 +105,22 @@ func TestSelfClosingAllowed(t *testing.T) {
 	}
 }
 
-func TestLiteralLessThanKept(t *testing.T) {
+// TestLiteralLessThanEscaped documents that a '<' which does not begin a tag
+// survives as text but is re-escaped, matching upstream sanitize-html, whose
+// parser decodes entities and whose serializer escapes text nodes with
+// escapeHtml(s, false). Emitting a bare '<' would let a following text run be
+// re-parsed as markup by the browser.
+func TestLiteralLessThanEscaped(t *testing.T) {
 	opts := Options{AllowedTags: []string{"b"}}
 	got := Sanitize("2 < 3 is true", opts)
-	if got != "2 < 3 is true" {
+	if got != "2 &lt; 3 is true" {
+		t.Fatalf("Sanitize = %q", got)
+	}
+	// Entities round-trip rather than double-escaping.
+	if got := Sanitize("Tom &amp; Jerry", opts); got != "Tom &amp; Jerry" {
+		t.Fatalf("Sanitize = %q", got)
+	}
+	if got := Sanitize("Tom & Jerry", opts); got != "Tom &amp; Jerry" {
 		t.Fatalf("Sanitize = %q", got)
 	}
 }
@@ -134,10 +146,14 @@ func TestNestedDisallowedTags(t *testing.T) {
 	}
 }
 
-func TestUnterminatedTagAsText(t *testing.T) {
+func TestUnterminatedTagDiscarded(t *testing.T) {
 	opts := Options{AllowedTags: []string{"b"}}
+	// A start tag that never closes runs to the end of the input. An HTML parser
+	// discards it along with everything it swallowed, and so does this port:
+	// showing the fragment as text would surface attribute values — including
+	// event-handler source — to the reader.
 	got := Sanitize("keep <b>x</b> and <notclosed", opts)
-	want := "keep <b>x</b> and <notclosed"
+	want := "keep <b>x</b> and "
 	if got != want {
 		t.Fatalf("Sanitize = %q; want %q", got, want)
 	}

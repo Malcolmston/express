@@ -58,24 +58,30 @@ func TestParityEncodeEmpty(t *testing.T) {
 	}
 }
 
-// --- encode(), nonAscii-style numeric output --------------------------------
-// The port's "nonAscii" mode rewrites every rune above 0x7F as a decimal
-// numeric reference. Upstream produces the identical decimal output under
-// {mode: 'nonAscii', level: 'xml', numeric: 'decimal'}; the relevant tested
-// substring is the non-ASCII run, verified against
-// describe('numeric') / describe('level', 'xml'):
+// --- encode(), nonAscii ------------------------------------------------------
+// Upstream describe('numeric') / describe('level', 'xml'):
 //
-//	'©∆℞😂' -> '&#169;&#8710;&#8478;&#128514;'
+//	encode('©∆℞😂', {mode: 'nonAscii', level: 'xml'})
+//	  -> '&#169;&#8710;&#8478;&#128514;'
 //
-// (Upstream's full nonAscii+named or nonAsciiPrintable control-char handling is
-// out of scope for the port; see the gaps note.)
+// At the XML level there are no named entities for these characters, so every
+// one falls back to a decimal numeric reference. At the default level ("all")
+// the HTML5 names win instead.
 func TestParityEncodeNonAsciiDecimal(t *testing.T) {
-	if got := Encode("©∆℞😂", EncodeOptions{Mode: "nonAscii"}); got != "&#169;&#8710;&#8478;&#128514;" {
-		t.Errorf("Encode nonAscii = %q; want %q", got, "&#169;&#8710;&#8478;&#128514;")
+	const wantXML = "&#169;&#8710;&#8478;&#128514;"
+	if got := Encode("©∆℞😂", EncodeOptions{Mode: ModeNonASCII, Level: LevelXML}); got != wantXML {
+		t.Errorf("Encode nonAscii/xml = %q; want %q", got, wantXML)
+	}
+	const wantAll = "&copy;&#8710;&rx;&#128514;"
+	if got := Encode("©∆℞😂", EncodeOptions{Mode: ModeNonASCII}); got != wantAll {
+		t.Errorf("Encode nonAscii = %q; want %q", got, wantAll)
 	}
 	// The five specials are still encoded in nonAscii mode.
-	if got := Encode("<é>", EncodeOptions{Mode: "nonAscii"}); got != "&lt;&#233;&gt;" {
-		t.Errorf("Encode nonAscii = %q; want %q", got, "&lt;&#233;&gt;")
+	if got := Encode("<é>", EncodeOptions{Mode: ModeNonASCII}); got != "&lt;&eacute;&gt;" {
+		t.Errorf("Encode nonAscii = %q; want %q", got, "&lt;&eacute;&gt;")
+	}
+	if got := Encode("<é>", EncodeOptions{Mode: ModeNonASCII, Level: LevelXML}); got != "&lt;&#233;&gt;" {
+		t.Errorf("Encode nonAscii/xml = %q; want %q", got, "&lt;&#233;&gt;")
 	}
 }
 
@@ -90,6 +96,9 @@ func TestParityDecodeEdgeCases(t *testing.T) {
 		{"", ""},
 		{"&", "&"},
 		{"&a", "&a"},
+		// Body scope accepts the legacy semicolon-less named references.
+		{"&amp", "&"},
+		{"&unknownentity;", "&unknownentity;"},
 	}
 	for _, c := range cases {
 		if got := Decode(c.in); got != c.want {

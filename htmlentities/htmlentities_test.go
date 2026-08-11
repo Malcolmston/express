@@ -24,7 +24,9 @@ func TestEncodeSpecialCharsKeepsNonAscii(t *testing.T) {
 
 func TestEncodeNonAscii(t *testing.T) {
 	got := Encode("café ©", EncodeOptions{Mode: "nonAscii"})
-	want := "caf&#233; &#169;"
+	// At the default level ("all") the named entity is preferred over the
+	// numeric reference, exactly as upstream does.
+	want := "caf&eacute; &copy;"
 	if got != want {
 		t.Fatalf("Encode nonAscii = %q; want %q", got, want)
 	}
@@ -32,7 +34,7 @@ func TestEncodeNonAscii(t *testing.T) {
 
 func TestEncodeNonAsciiAlsoEncodesSpecials(t *testing.T) {
 	got := Encode("<é>", EncodeOptions{Mode: "nonAscii"})
-	want := "&lt;&#233;&gt;"
+	want := "&lt;&eacute;&gt;"
 	if got != want {
 		t.Fatalf("Encode = %q; want %q", got, want)
 	}

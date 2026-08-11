@@ -21,15 +21,40 @@ func ExampleEncode() {
 
 // ExampleEncode_nonAscii demonstrates the stricter "nonAscii" mode, selected
 // through EncodeOptions. In addition to escaping the five special characters,
-// this mode rewrites every rune above code point 127 as a decimal numeric
-// entity. That makes the output pure ASCII, which is useful for transports that
-// are not guaranteed to be UTF-8 clean. Here the accented "é" becomes &#233;
-// and the copyright sign becomes &#169;. The special characters would still be
-// escaped in this mode if the input contained any.
+// this mode encodes every rune above code point 127, which makes the output
+// pure ASCII and so safe for transports that are not guaranteed to be UTF-8
+// clean. Each character is written as the named entity the level offers for it,
+// and only falls back to a numeric reference when there is no name: at the
+// default level "é" becomes &eacute; and the copyright sign becomes &copy;.
 func ExampleEncode_nonAscii() {
-	out := htmlentities.Encode("café ©", htmlentities.EncodeOptions{Mode: "nonAscii"})
+	out := htmlentities.Encode("café ©", htmlentities.EncodeOptions{Mode: htmlentities.ModeNonASCII})
+	fmt.Println(out)
+	// Output: caf&eacute; &copy;
+}
+
+// ExampleEncode_nonAsciiXML shows the same mode restricted to the XML entity
+// level, where only &amp; &lt; &gt; &quot; and &apos; have names. Everything
+// else falls back to a decimal numeric reference, which is what you want when
+// the consumer only understands the five XML entities.
+func ExampleEncode_nonAsciiXML() {
+	out := htmlentities.Encode("café ©", htmlentities.EncodeOptions{
+		Mode:  htmlentities.ModeNonASCII,
+		Level: htmlentities.LevelXML,
+	})
 	fmt.Println(out)
 	// Output: caf&#233; &#169;
+}
+
+// ExampleDecodeEntity resolves a single entity reference. Unrecognized input is
+// returned unchanged rather than dropped.
+func ExampleDecodeEntity() {
+	fmt.Println(htmlentities.DecodeEntity("&copy;"))
+	fmt.Println(htmlentities.DecodeEntity("&#233;"))
+	fmt.Println(htmlentities.DecodeEntity("&nosuchentity;"))
+	// Output:
+	// ©
+	// é
+	// &nosuchentity;
 }
 
 // ExampleDecode converts HTML entities back into their literal characters. It

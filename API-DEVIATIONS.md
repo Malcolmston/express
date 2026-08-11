@@ -303,3 +303,121 @@ compare the resulting id. Until the port grows such a seam, the strongest
 cross-language claim available is the property set the harness does check —
 length, alphabet membership, reachability of every alphabet character,
 distinctness, and rejection of an invalid size.
+## The HTML-safety cluster
+
+`escapehtml`, `escaperegexp`, `htmlentities`, `striptags` and `sanitizehtml` are
+measured by
+`parity/express/nested/{escapehtml,escaperegexp,htmlentities,striptags,sanitizehtml}/`.
+This is the cluster where a divergence is a potential XSS hole rather than a
+cosmetic difference, so the bar for declaring one is higher here than anywhere
+else in this file: a deviation is listed only where matching upstream would mean
+being *less* safe, emitting invalid UTF-8, or reproducing an upstream bug.
+
+`escapehtml` (oracle `escape-html@1.0.3`, 36/36 compared cases) and
+`escaperegexp` (oracle `escape-string-regexp@5.0.0`, 61/61) reach **100% with no
+deviations at all**. Their only difference from upstream is that the Node
+functions coerce a non-string argument — `escapeHtml(null)` is `"null"` — where
+the Go functions take a typed `string`; that is a language property, not a
+behaviour, and it is recorded in the respective `COVERAGE.md` rather than here.
+
+### `htmlentities` (npm `html-entities`, oracle `html-entities@2.6.0`)
+
+Parity: 110/110 compared cases (100%), 3 deviations, 113 cases total.
+Harness: `parity/express/nested/htmlentities/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| An unrecognized `Mode` falls back to `specialChars`, an unrecognized `Level` to `all`, rather than throwing. | `enc-unknown-mode`, `enc-unknown-level`, `dec-unknown-level` | Upstream has no defined behaviour here: it indexes a lookup table with the option value and hands the resulting `undefined` to `String.prototype.replace`, which throws a `TypeError`. `Encode` and `Decode` return a bare `string` and have no error channel, and panicking out of an escaping helper is the one outcome worse than falling back to the safest mode. Both functions accept the same *valid* values as upstream. |
+
+Two differences are visible in the source but not in the harness, and are
+recorded here so they are not mistaken for oversights. A numeric reference to an
+unpaired surrogate — `&#xD800;` — leaves upstream holding a lone UTF-16
+surrogate; a Go string cannot represent one, so `Decode` yields U+FFFD. The
+parity case `dec-numeric-surrogate` *passes* only because the JSON transport
+between the two runners cannot carry a lone surrogate either, so both sides
+arrive as U+FFFD; the case is kept as documentation of the real difference.
+Second, upstream coerces `null` and `undefined` to `""` where the Go functions
+take a `string`.
+
+Everything else in this port was **fixed** rather than declared, and the fixes
+were substantial: measured parity went from 55/110 (50.0%) to 110/110. The
+`Encode` non-ASCII modes emitted decimal numeric references where upstream
+prefers the level's *named* entity (`&eacute;`, not `&#233;`); the
+`nonAsciiPrintable`, `nonAsciiPrintableOnly` and `extensive` modes, the `level`
+and `numeric` options, and `decodeEntity` did not exist; `Decode` knew a curated
+32-entry table instead of the 2231-entry HTML5 set, rejected the legacy
+semicolon-less references that a browser accepts (`&amp` really is `&` in an HTML
+body), had no `scope` handling, and did not apply the Windows-1252 remapping the
+HTML spec mandates for numeric references in the C1 range. `tables.go` is now
+generated straight out of the installed npm package by
+`parity/express/nested/htmlentities/node/gen-tables.js`, so the data is
+mechanically derived from the oracle rather than transcribed, and the body-scope
+matching patterns are upstream's regexes verbatim.
+
+### `striptags` (npm `striptags`, oracle `striptags@3.2.0`)
+
+Parity: 109/109 compared cases (100%), 7 deviations, 116 cases total.
+Harness: `parity/express/nested/striptags/`.
+
+Every deviation is the same one thing, and **upstream is the outlier**:
+`striptags` lower-cases the tag name it extracts from the input
+(`normalize_tag`) but compares it against the caller's allowlist *verbatim*. An
+allowlist entry that is not already a bare lower-case name therefore matches
+nothing at all — silently. The port normalizes both sides, so an entry that
+obviously means "keep `<p>`" keeps `<p>`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| An array entry may be bracketed (`["<p>"]`) or upper-case (`["P"]`). | `arr-brackets`, `arr-upper-entry` | Upstream builds `new Set(allowable_tags)` from the array untouched, so neither entry can ever equal the lower-cased bare name the matcher looks up. Both are dead configuration upstream; both do what the caller plainly meant here. |
+| A string entry may be a bare name (`"p"`), carry whitespace (`"<p >"`), be written as a close tag (`"</p>"`), be upper-case (`"<P>"`), or contain a hyphen (`"<my-tag>"`). | `str-no-brackets`, `str-trailing-space`, `str-close-form`, `str-upper`, `str-hyphen` | Upstream scans the string with `/<(\w*)>/g`, so a space, a slash or a hyphen ends the match and nothing is extracted, and an upper-case name is extracted but can never match. The hyphen case matters in practice: `<my-tag>` is how every custom element is spelled, and upstream cannot allowlist one. |
+
+In every one of these cases the tag the port keeps is exactly the tag the caller
+named in their own allowlist, so none of them widens what an attacker can get
+through — which is why they are deviations and not a security finding.
+
+One real gap was **closed** rather than declared: `striptags.init_streaming_mode`
+was not ported at all, so a tag split across two chunks could not be handled.
+`NewStreamer` now carries the parser state — state, tag buffer, nesting depth and
+quote character — across `Write` calls, and `StripTagsWith` is one `Write` on a
+fresh `Streamer`. Measured parity went from 97/109 (89.0%) to 109/109.
+
+### `sanitizehtml` (npm `sanitize-html`, oracle `sanitize-html@2.17.6`)
+
+Parity: 223/223 compared cases (100%), 10 deviations, 233 cases total.
+Harness: `parity/express/nested/sanitizehtml/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| An attribute **name** containing a double quote or a backtick is dropped; upstream keeps it and writes it back out. | `by-attr-name-with-quote`, `by-attr-name-backtick` | **The port is stricter.** Upstream's `VALID_HTML_ATTRIBUTE_NAME` is `/^[^\0\t\n\f\r /<=>]+$/`, which permits both characters, so `<p data-x"onclick=alert(1)>` under a `data-*` policy comes back as `<p data-x"onclick="alert(1)">` — a name that a browser re-parses into two attributes, one of them an event handler. Matching upstream here would mean emitting that. |
+| `AllowedTags: []string{"*"}` means "every tag"; upstream's `allowedTags: ['*']` permits only a tag literally named `*`. | `pol-tags-star-literal` | Upstream spells "every tag" as `allowedTags: false`, which has no natural Go equivalent — the field is a `[]string`, and `nil` already means "allow nothing beyond the defaults". `"*"` is the spelling the rest of this package already uses for a wildcard (`AllowedAttributes`, `AllowedClasses`, `AllowedSchemes`), so reusing it is the consistent choice. |
+| An allowlist entry is matched case-insensitively, so `AllowedTags: []string{"P"}` keeps `<p>`. | `pol-tags-allowlist-uppercase` | Same shape as the `striptags` deviation above and the same reason: upstream lower-cases the *tag* and not the *allowlist*, so an upper-case entry is silently dead configuration. The tag admitted is the tag the caller named. |
+| `AllowedAttributes: nil` means "nothing beyond what is listed"; upstream's `allowedAttributes: null` means **allow every attribute**. | `pol-attrs-null` | `nil` is the zero value of a Go map, so reading it as "allow everything" would make `sanitizehtml.Options{}` — the obvious way to write a restrictive policy — silently permit `onclick`. A sanitizer must not have a permissive zero value. Allow-all is spelled `AllowedAttributes: map[string][]string{"*": {"*"}}`, which is covered by `pol-attrs-allow-all-glob` and matches upstream exactly. |
+| `completelyDiscard` really discards the subtree; upstream leaves nested **allowed** tags in place inside it. | `pol-mode-completely-discard-nested` | Upstream's `skipText` flag suppresses text but not elements, so `<foo><b>y</b></foo>` keeps `<b>y</b>` in a mode whose name promises otherwise. That is an upstream bug, not an interface. The port does match upstream's other `completelyDiscard` quirk, which *is* observable in ordinary use: text whose enclosing element is not allowed — including all text at top level — is blanked (`pol-mode-completely-discard-text-only`). |
+| Nesting is preserved as authored: `<p><div>…</div></p>` is not rewritten. | `by-nonstandard-nesting`, `by-malformed-lt-in-tag` | Upstream runs htmlparser2, a full HTML tree builder, so it applies implied end tags and recovers from malformed tags by reordering nodes. This port is a tokenizer over the standard library, by design and by its package documentation. It does balance its own output — a close tag that does not match the innermost open element is dropped, anything still open at the end of the input is closed, and the two HTML end-tag quirks (`</p>` becomes an empty `<p>`, `</br>` becomes a `<br>`) are implemented — so the output is never unbalanced; it simply does not re-parent. |
+| An unterminated tag is discarded entirely, where htmlparser2 flushes the fragment it had buffered as text. | `by-unterminated-name-only`, `unterminated-end-tag-space` | `a<p` yields `"ap"` upstream and `"a"` here; `<p>a</p ` yields `"<p>a</p> "` upstream and `"<p>a</p>"` here. Surfacing part of a half-written tag as content means attribute values — including event-handler source — can be shown to the reader, and it is the shape several sanitizer bypasses have taken. Dropping the incomplete fragment loses a space; keeping it loses the invariant. |
+
+Everything else was **fixed**, and this was the least faithful port in the
+cluster when first measured: 126/173 compared cases (72.8%) to 223/223. Two of
+the divergences were security bugs and are written up in
+`parity/express/nested/sanitizehtml/security.json` rather than here — the default
+`allowedSchemesAppliedToAttributes` list held three of upstream's nineteen
+entries, so `javascript:` survived in `action`, `formaction`, `poster`,
+`xlink:href` and thirteen more the moment a policy permitted one of them, and an
+allowed `nonTextTag` had its content emitted verbatim, which turned `option` in
+`AllowedTags` into a pass-through for arbitrary markup. The rest were
+correctness: `col` was missing from the default `selfClosing` list and `xmp` from
+the default `nonTextTags`; attribute values were escaped with
+`html.EscapeString` (`&#34;`, `&#39;`) instead of upstream's `&quot;` and
+untouched apostrophe; an empty attribute value was always written as `=""` rather
+than dropped for a non-boolean attribute and written bare for a boolean one, so
+`allowedEmptyAttributes` and `nonBooleanAttributes` are now real options; an
+attribute glob only matched by prefix instead of as an anchored pattern; the
+escape modes echoed the raw source of a disallowed tag instead of the normalized
+tag, dropped the body of a raw-text element instead of escaping it, and treated
+an unrecognized mode as `discard` instead of `escape`; CDATA sections and
+processing instructions were partly surfaced as text instead of being read as
+bogus comments; the HTML raw-text elements (`title`, `iframe`, `noembed`,
+`noframes`, `plaintext`) were parsed as ordinary markup; and void elements were
+decided by the `SelfClosing` *option* rather than by the language, so a normal
+element named in `SelfClosing` could not have children and a void element not
+named there was never closed.
