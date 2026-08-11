@@ -8,9 +8,12 @@ import (
 	"github.com/malcolmston/express"
 )
 
-func do(t *testing.T, h express.Handler, r *http.Request) *httptest.ResponseRecorder {
+func do(t *testing.T, h express.Handler, r *http.Request, trustProxy ...bool) *httptest.ResponseRecorder {
 	t.Helper()
 	app := express.New()
+	if len(trustProxy) > 0 && trustProxy[0] {
+		app.Enable("trust proxy")
+	}
 	app.Use(h)
 	app.Use(func(req *express.Request, res *express.Response, next express.Next) {
 		res.Send("secure-ok")
@@ -34,9 +37,22 @@ func TestRedirectsInsecure(t *testing.T) {
 func TestForwardedProtoHTTPS(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	r.Header.Set("X-Forwarded-Proto", "https")
-	rec := do(t, New(), r)
+	rec := do(t, New(), r, true)
 	if rec.Body.String() != "secure-ok" {
 		t.Fatalf("expected pass-through, got %q", rec.Body.String())
+	}
+}
+
+// TestForwardedProtoIgnoredWithoutTrustProxy pins the security-relevant default:
+// with "trust proxy" off (the Express default) a client-supplied
+// X-Forwarded-Proto must NOT be able to claim the connection is already secure
+// and so bypass the HTTPS upgrade.
+func TestForwardedProtoIgnoredWithoutTrustProxy(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	r.Header.Set("X-Forwarded-Proto", "https")
+	rec := do(t, New(), r)
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("code = %d, want 301 (spoofed X-Forwarded-Proto must be ignored)", rec.Code)
 	}
 }
 

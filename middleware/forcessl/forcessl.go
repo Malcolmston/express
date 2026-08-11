@@ -31,9 +31,11 @@
 // which makes every request pass straight through. A 301 is used rather than a
 // 302 so that browsers and intermediaries cache the upgrade; be aware that 301s
 // are aggressively cached, so misconfiguring the redirect can be sticky on
-// clients. Because req.Secure() trusts X-Forwarded-Proto, only run this behind a
-// proxy you control that strips client-supplied forwarding headers, or a client
-// could spoof "https" and bypass the redirect.
+// clients. req.Secure() consults X-Forwarded-Proto only when the application
+// has enabled the "trust proxy" setting, so a directly exposed app cannot be
+// tricked into skipping the redirect by a spoofed header; enable that setting
+// only behind a proxy you control which overwrites client-supplied forwarding
+// headers.
 //
 // Compared with the Node original this port keeps the core scheme-upgrade
 // behavior but is deliberately minimal: there are no options for a custom
