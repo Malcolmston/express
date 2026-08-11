@@ -26,13 +26,20 @@
 // Internally each candidate is first expanded by Normalize into a matchable
 // pattern: the specials "urlencoded" and "multipart" expand to their full
 // forms; a leading "+suffix" becomes "*/*+suffix"; a bare extension token (no
-// slash) is resolved through a small MIME table, and an unrecognised extension
-// is treated as no match (matching the upstream mime.lookup returning false);
-// everything containing a slash is passed through unchanged. The concrete value
-// being tested is normalized by NormalizeType, which strips any ";"-delimited
-// parameters, lower-cases what remains, and validates it as a real
-// "type/subtype" (so a bogus value such as "bogus" or "text/html**" never
-// matches anything).
+// slash) is resolved through the sibling mimetypes package, and an unrecognised
+// extension is treated as no match (matching the upstream mime.lookup returning
+// false); everything containing a slash is passed through unchanged.
+//
+// The concrete value being tested is normalized by NormalizeType, which is a
+// port of what media-typer's parse+format pair does upstream: the value is split
+// at the first ";", the media type is lower-cased and validated against the
+// RFC 6838 name grammar, the subtype's "+suffix" is separated and re-validated
+// on its own, and — importantly — the parameter list that follows is parsed and
+// must be well-formed in its entirety even though the parameters are then
+// discarded. That strictness is load-bearing: "text/html;", "text/html; charset"
+// and "text/html; charset=utf-8 junk" are all parse errors upstream rather than
+// values whose parameters get ignored, so they match nothing at all. A bogus
+// value such as "bogus" or "text/html**" likewise never matches.
 //
 // Match performs the actual comparison of an expected pattern against a
 // concrete type. It supports "*" wildcards in either the type or the subtype
@@ -50,40 +57,27 @@ package typeis
 import (
 	"regexp"
 	"strings"
+
+	"github.com/malcolmston/express/mimetypes"
 )
 
-// mimeExt maps extension-style names to full MIME types, standing in for the
-// npm mime-types database that the original type-is consults via mime.lookup.
-// An extension that is not present here resolves to no match, exactly as an
-// unknown extension yields false from mime.lookup upstream.
-var mimeExt = map[string]string{
-	"json": "application/json",
-	"html": "text/html",
-	"htm":  "text/html",
-	"xml":  "application/xml",
-	"text": "text/plain",
-	"txt":  "text/plain",
-	"js":   "application/javascript",
-	"css":  "text/css",
-	"png":  "image/png",
-	"jpeg": "image/jpeg",
-	"jpg":  "image/jpeg",
-	"gif":  "image/gif",
-}
-
-// mediaTypeRe validates a normalized, lower-cased "type/subtype" value. The
-// character classes mirror media-typer's grammar: the type name allows no "."
-// or "+", the subtype name additionally allows "." and "+" (for suffixes), and
-// neither allows "*". This is what makes values like "bogus" (no slash) or
-// "text/html**" (invalid character) fail to normalize.
-var mediaTypeRe = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$`)
+// The media-type grammar, ported from media-typer 0.3.0 (the module type-is
+// parses Content-Type values with). Note that only spaces — not tabs — are
+// permitted around the type, and that each name is capped at 127 characters.
+var (
+	typeSplitRE   = regexp.MustCompile(`^ *([A-Za-z0-9][A-Za-z0-9!#$&^_-]{0,126})/([A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}) *$`)
+	typeNameRE    = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9!#$&^_-]{0,126}$")
+	subtypeNameRE = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9!#$&^_.-]{0,126}$")
+	// paramRE matches one "; name=value" parameter at the current position. The
+	// value is either a token or a quoted string with backslash escapes.
+	paramRE = regexp.MustCompile("^; *([!#$%&'*+\\-.0-9A-Z^_`a-z|~]+) *= *(\"(?:[ !\\x23-\\x5b\\x5d-\\x7e\\x{80}-\\x{ff}]|\\\\[\\x20-\\x7e])*\"|[!#$%&'*+\\-.0-9A-Z^_`a-z|~]+) *")
+)
 
 // lookupExtension resolves a bare extension token (with or without a leading
-// dot) to a full MIME type, returning "" when the extension is unknown.
+// dot) to a full MIME type through the mimetypes table, returning "" when the
+// extension is unknown — the same outcome as mime.lookup returning false.
 func lookupExtension(t string) string {
-	e := strings.ToLower(t)
-	e = strings.TrimPrefix(e, ".")
-	if m, ok := mimeExt[e]; ok {
+	if m, ok := mimetypes.Lookup(t); ok {
 		return m
 	}
 	return ""
@@ -92,19 +86,64 @@ func lookupExtension(t string) string {
 // NormalizeType strips any parameters (e.g. "; charset=utf-8") from a
 // Content-Type value, lower-cases it, and validates it as a "type/subtype"
 // media type. It returns "" for an empty or invalid value.
+//
+// This mirrors media-typer's parse followed by format, which means the
+// parameter list is validated even though it is thrown away: a trailing ";", a
+// parameter with no value, or trailing junk after a parameter all make the
+// whole value invalid. The subtype's "+suffix" is split off at the last "+" and
+// each half is checked against its own name grammar, so "image/svg+xml" round
+// trips while "text/html++x" does not, and a bare trailing "+" is dropped
+// because an empty suffix is not re-emitted.
 func NormalizeType(value string) string {
 	if value == "" {
 		return ""
 	}
-	ct := value
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = ct[:i]
+
+	semi := strings.IndexByte(value, ';')
+	typePart := value
+	if semi >= 0 {
+		typePart = value[:semi]
 	}
-	ct = strings.ToLower(strings.TrimSpace(ct))
-	if !mediaTypeRe.MatchString(ct) {
+
+	m := typeSplitRE.FindStringSubmatch(strings.ToLower(typePart))
+	if m == nil {
 		return ""
 	}
-	return ct
+	typ, subtype := m[1], m[2]
+	suffix := ""
+	if i := strings.LastIndexByte(subtype, '+'); i >= 0 {
+		suffix = subtype[i+1:]
+		subtype = subtype[:i]
+	}
+
+	// Parse (and thereby validate) the parameter list. Every byte after the
+	// first ";" must be consumed by a well-formed parameter.
+	if semi >= 0 {
+		pos := semi
+		for pos < len(value) {
+			match := paramRE.FindString(value[pos:])
+			if match == "" {
+				return ""
+			}
+			pos += len(match)
+		}
+	}
+
+	// Reformat, re-validating each part the way media-typer's format does.
+	if !typeNameRE.MatchString(typ) {
+		return ""
+	}
+	if subtype == "" || !subtypeNameRE.MatchString(subtype) {
+		return ""
+	}
+	out := typ + "/" + subtype
+	if suffix != "" {
+		if !typeNameRE.MatchString(suffix) {
+			return ""
+		}
+		out += "+" + suffix
+	}
+	return out
 }
 
 // normalize expands a candidate into a matchable pattern, mirroring the npm

@@ -62,15 +62,19 @@ const token = "[!#$%&'*+.^_`|~0-9A-Za-z-]"
 var (
 	typeRE  = regexp.MustCompile(`^` + token + `+/` + token + `+$`)
 	tokenRE = regexp.MustCompile(`^` + token + `+$`)
-	// textRE matches values that may be written as a quoted-string: HTAB, SP,
-	// printable ASCII, and obs-text (%x80-FF), per RFC 9110 sec 5.6.4. Values
-	// outside this class (e.g. NUL or vertical tab) cannot be represented and
-	// are rejected by Format, matching upstream qstring().
-	textRE = regexp.MustCompile(`^[\x{09}\x{20}-\x{7e}\x{80}-\x{ff}]*$`)
+	// textRE matches values that can be written as a quoted-string, mirroring
+	// upstream's TEXT_REGEXP exactly: vertical tab, printable ASCII and obs-text
+	// (%x80-FF), and at least one character. Note what is *excluded*: horizontal
+	// tab, CR, LF and NUL. A value carrying any of those cannot be represented in
+	// a header, so Format rejects it rather than emitting it.
+	textRE = regexp.MustCompile("^[\\x{0b}\\x{20}-\\x{7e}\\x{80}-\\x{ff}]+$")
 	// paramRE matches a single "; name=value" parameter at the start of the
-	// remaining input. The value is either a token or a quoted string.
-	paramRE    = regexp.MustCompile(`^;[ \t]*(` + token + `+)[ \t]*=[ \t]*("(?:\\.|[^"\\])*"|` + token + `+)[ \t]*`)
-	unescapeRE = regexp.MustCompile(`\\(.)`)
+	// remaining input, mirroring upstream's PARAM_REGEXP. Only spaces are allowed
+	// as padding (not tabs), and the quoted-string body is restricted to the same
+	// character class as textRE plus backslash escapes — so a CR, LF, tab or NUL
+	// inside quotes is a parse error, not a value that survives into the result.
+	paramRE    = regexp.MustCompile("^; *(" + token + "+) *= *(\"(?:[\\x{0b}\\x{20}\\x{21}\\x{23}-\\x{5b}\\x{5d}-\\x{7e}\\x{80}-\\x{ff}]|\\\\[\\x{0b}\\x{20}-\\x{ff}])*\"|" + token + "+) *")
+	unescapeRE = regexp.MustCompile("\\\\([\\x{0b}\\x{20}-\\x{ff}])")
 	escapeRE   = regexp.MustCompile(`([\\"])`)
 )
 
@@ -136,14 +140,19 @@ func Format(ct ContentType) (string, error) {
 		b.WriteString(k)
 		b.WriteByte('=')
 		v := ct.Parameters[k]
-		if tokenRE.MatchString(v) {
+		switch {
+		case tokenRE.MatchString(v):
+			// A token needs no quoting.
 			b.WriteString(v)
-		} else if textRE.MatchString(v) {
+		case v != "" && !textRE.MatchString(v):
+			// Mirrors upstream's qstring, which only rejects a *non-empty*
+			// value that cannot appear in a quoted-string. An empty value is
+			// therefore emitted as the empty quoted string, not an error.
+			return "", fmt.Errorf("contenttype: invalid parameter value %q", v)
+		default:
 			b.WriteByte('"')
 			b.WriteString(escapeRE.ReplaceAllString(v, `\$1`))
 			b.WriteByte('"')
-		} else {
-			return "", fmt.Errorf("contenttype: invalid parameter value %q", v)
 		}
 	}
 	return b.String(), nil

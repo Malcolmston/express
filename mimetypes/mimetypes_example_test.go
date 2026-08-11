@@ -42,24 +42,24 @@ func ExampleContentType() {
 	// Output: text/html; charset=utf-8 true
 }
 
-// ExampleExtension performs the reverse lookup, from a MIME type back to its
-// canonical file extension. Any parameters on the type are ignored, so a
-// charset suffix does not affect the result. Where several extensions share a
-// type, the most common one is returned: image/jpeg maps to "jpg". The
-// boolean is false for a type with no known extension. The extension is
-// returned without a leading dot.
+// ExampleExtension performs the reverse lookup, from a MIME type back to a file
+// extension. Any parameters on the type are ignored, so a charset suffix does
+// not affect the result. Where several extensions share a type, the first one
+// mime-db lists is returned, which is not always the most familiar spelling:
+// image/jpeg maps to "jpeg", not "jpg". The boolean is false for a type with no
+// known extension. The extension is returned without a leading dot.
 func ExampleExtension() {
 	ext, ok := mimetypes.Extension("image/jpeg")
 	fmt.Println(ext, ok)
-	// Output: jpg true
+	// Output: jpeg true
 }
 
-// ExampleCharset reports the charset that applies to a MIME type. Every text/*
-// type, along with JSON, XML, JavaScript and any "+json" or "+xml"
-// structured-suffix type, is treated as UTF-8. Types with no associated
-// charset, such as image/png, return ("", false). This is the same rule
-// ContentType uses when deciding whether to append a charset parameter. Here
-// application/json is reported as UTF-8.
+// ExampleCharset reports the charset that applies to a MIME type: the one
+// mime-db declares for it, with a blanket UTF-8 fallback for anything under
+// text/. Types with no declared charset, such as image/png — and, less
+// obviously, application/xml and image/svg+xml — return ("", false). This is the
+// same rule ContentType uses when deciding whether to append a charset
+// parameter. Here application/json is reported as UTF-8.
 func ExampleCharset() {
 	cs, ok := mimetypes.Charset("application/json")
 	fmt.Println(cs, ok)

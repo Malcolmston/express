@@ -119,7 +119,7 @@ func TestParityExtension(t *testing.T) {
 func TestParityLookupExtension(t *testing.T) {
 	cases := map[string]string{
 		".html": "text/html",
-		".js":   "text/javascript", // current mime-db via mime-score
+		".js":   "application/javascript", // mime-types@2.1.35 ranking
 		".json": "application/json",
 		".rtf":  "application/rtf",
 		".txt":  "text/plain",

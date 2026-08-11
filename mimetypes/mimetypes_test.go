@@ -7,8 +7,8 @@ func TestLookup(t *testing.T) {
 		"file.html":      "text/html",
 		"index.htm":      "text/html",
 		"style.css":      "text/css",
-		"app.js":         "text/javascript",
-		"mod.mjs":        "text/javascript",
+		"app.js":         "application/javascript",
+		"mod.mjs":        "application/javascript",
 		"data.json":      "application/json",
 		"doc.xml":        "application/xml",
 		"notes.txt":      "text/plain",
@@ -21,14 +21,14 @@ func TestLookup(t *testing.T) {
 		"anim.gif":       "image/gif",
 		"vec.svg":        "image/svg+xml",
 		"pic.webp":       "image/webp",
-		"fav.ico":        "image/x-icon",
+		"fav.ico":        "image/vnd.microsoft.icon",
 		"doc.pdf":        "application/pdf",
 		"a.zip":          "application/zip",
 		"a.gz":           "application/gzip",
 		"a.tar":          "application/x-tar",
 		"v.mp4":          "video/mp4",
 		"s.mp3":          "audio/mpeg",
-		"s.wav":          "audio/wav",
+		"s.wav":          "audio/wave",
 		"s.ogg":          "audio/ogg",
 		"v.webm":         "video/webm",
 		"f.woff":         "font/woff",
@@ -77,7 +77,7 @@ func TestContentType(t *testing.T) {
 		"application/json": "application/json; charset=utf-8",
 		"png":              "image/png",
 		"image/png":        "image/png",
-		"application/xml":  "application/xml; charset=utf-8",
+		"application/xml":  "application/xml",
 	}
 	for in, want := range cases {
 		got, ok := ContentType(in)
@@ -98,7 +98,7 @@ func TestExtension(t *testing.T) {
 	cases := map[string]string{
 		"text/html":             "html",
 		"application/json":      "json",
-		"image/jpeg":            "jpg",
+		"image/jpeg":            "jpeg",
 		"image/png":             "png",
 		"application/pdf":       "pdf",
 		"text/plain":            "txt",
@@ -117,13 +117,10 @@ func TestExtension(t *testing.T) {
 
 func TestCharset(t *testing.T) {
 	yes := map[string]string{
-		"text/plain":               "UTF-8",
-		"text/html":                "UTF-8",
-		"application/json":         "UTF-8",
-		"application/xml":          "UTF-8",
-		"application/javascript":   "UTF-8",
-		"application/vnd.api+json": "UTF-8",
-		"image/svg+xml":            "UTF-8",
+		"text/plain":             "UTF-8",
+		"text/html":              "UTF-8",
+		"application/json":       "UTF-8",
+		"application/javascript": "UTF-8",
 	}
 	for in, want := range yes {
 		got, ok := Charset(in)
@@ -136,5 +133,12 @@ func TestCharset(t *testing.T) {
 	}
 	if _, ok := Charset("application/octet-stream"); ok {
 		t.Error("octet-stream should have no charset")
+	}
+	// mime-db declares no charset for these, and a structured suffix alone is
+	// not enough, so upstream reports none either.
+	for _, in := range []string{"application/xml", "application/vnd.api+json", "image/svg+xml", "application/ld+json"} {
+		if _, ok := Charset(in); ok {
+			t.Errorf("Charset(%q) should report no charset", in)
+		}
 	}
 }

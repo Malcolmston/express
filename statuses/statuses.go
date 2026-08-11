@@ -16,10 +16,12 @@
 // Internally the package is backed by a code-to-message map covering the common
 // registered codes in the 100-511 range and a lazily built, lower-cased
 // message-to-code map for the reverse direction. Message performs a direct map
-// lookup and returns the empty string for an unknown code. Code trims and
-// lower-cases its input before looking it up, so matching is case-insensitive
-// and tolerant of surrounding whitespace; an unknown phrase yields a non-nil
-// error rather than a zero code that could be mistaken for a valid status.
+// lookup and returns the empty string for an unknown code. Code lower-cases its
+// input before looking it up, so matching is case-insensitive but otherwise
+// exact — surrounding whitespace is not stripped, exactly as the npm original
+// indexes its table by the raw lower-cased phrase; an unknown phrase yields a
+// non-nil error rather than a zero code that could be mistaken for a valid
+// status.
 //
 // Three small sets drive classification. IsRedirect reports true for the 3xx
 // codes that carry a Location header and cause the client to follow it (300,
@@ -146,9 +148,11 @@ func Message(code int) string {
 }
 
 // Code returns the status code for the given reason phrase. Matching is
-// case-insensitive. It returns an error if the message is unknown.
+// case-insensitive but otherwise exact: the phrase is not trimmed, so
+// " Not Found " is a miss, matching the npm original's lower-cased table
+// lookup. It returns an error if the message is unknown.
 func Code(message string) (int, error) {
-	if code, ok := messageToCode[strings.ToLower(strings.TrimSpace(message))]; ok {
+	if code, ok := messageToCode[strings.ToLower(message)]; ok {
 		return code, nil
 	}
 	return 0, fmt.Errorf("invalid status message: %q", message)
