@@ -76,20 +76,18 @@ func TestParityComparisons(t *testing.T) {
 }
 
 // TestParityEquality mirrors the strict-valid entries of test/fixtures/equality.js
-// (version1 equals version2, build metadata ignored). Upstream entries with an
-// internal space after the "v"/"=" prefix require loose mode and are omitted.
+// (version1 equals version2, build metadata ignored). The fixture rows whose
+// second version carries a leading "=" — and those with a space after the "v"/"="
+// prefix — are flagged loose:true upstream, so semver.eq("1.2.3", "=1.2.3")
+// throws with the default options; they are listed as invalid below instead. This
+// was measured against semver@7.8.5 by parity/express/nested/semver.
 func TestParityEquality(t *testing.T) {
 	pairs := [][2]string{
 		{"1.2.3", "v1.2.3"},
-		{"1.2.3", "=1.2.3"},
 		{"1.2.3", " v1.2.3"},
-		{"1.2.3", " =1.2.3"},
 		{"1.2.3-0", "v1.2.3-0"},
-		{"1.2.3-0", "=1.2.3-0"},
 		{"1.2.3-1", "v1.2.3-1"},
-		{"1.2.3-1", "=1.2.3-1"},
 		{"1.2.3-beta", "v1.2.3-beta"},
-		{"1.2.3-beta", "=1.2.3-beta"},
 		{"1.2.3-beta+build", "1.2.3-beta+otherbuild"},
 		{"1.2.3+build", "1.2.3+otherbuild"},
 		{"  v1.2.3+build", "1.2.3+otherbuild"},
@@ -97,6 +95,12 @@ func TestParityEquality(t *testing.T) {
 	for _, p := range pairs {
 		if !EQ(p[0], p[1]) {
 			t.Errorf("EQ(%q,%q) = false, want true", p[0], p[1])
+		}
+	}
+	// Loose-only spellings: strict parse rejects them, so Parse must fail.
+	for _, in := range []string{"=1.2.3", "=1.2.3-0", "=1.2.3-beta", "= 1.2.3", "v 1.2.3"} {
+		if Valid(in) {
+			t.Errorf("Valid(%q) = true; upstream needs loose mode for this spelling", in)
 		}
 	}
 }

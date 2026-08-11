@@ -8,10 +8,13 @@
 //
 // A version is Major.Minor.Patch with optional dot-separated prerelease and
 // build-metadata identifiers, for example "1.2.3-alpha.1+build.5". Parse turns
-// a string into a *Version; MustParse panics instead of returning an error and
-// is convenient for constants and tests. Valid reports whether a string is a
-// well-formed version, and Clean normalizes surrounding whitespace and an
-// optional leading "v" or "=".
+// a string into a *Version, accepting surrounding whitespace and a single
+// optional lowercase "v" exactly as node-semver's strict grammar does — an
+// uppercase "V" or a leading "=" is loose-mode-only and is rejected. MustParse
+// panics instead of returning an error and is convenient for constants and
+// tests. Valid reports whether a string is a well-formed version, and Clean is
+// the more permissive normalizer: it trims whitespace and strips any run of
+// leading "=" and "v" characters before parsing.
 //
 // Ordering follows the spec precisely: numeric fields compare numerically, a
 // version with a prerelease has lower precedence than the same version without
@@ -29,11 +32,14 @@
 // Range matching is provided by Satisfies and the Range type, which understand
 // the common npm range grammar: plain comparators (">=1.2.0", "<2.0.0", "=1.0.0"
 // and a bare "1.2.3"), caret ranges ("^1.2.3"), tilde ranges ("~1.2.0"),
-// x-ranges ("1.x", "1.2.*", "*"), hyphen ranges ("1.2.3 - 2.3.4"), space- or
-// comma-separated AND terms within a set, and "||" separating alternative sets.
-// Prerelease versions only satisfy a range when a comparator in the same tuple
-// names the same Major.Minor.Patch with its own prerelease, matching npm's
-// default (includePrerelease=false) behaviour.
+// x-ranges ("1.x", "1.2.*", "*"), hyphen ranges ("1.2.3 - 2.3.4"),
+// whitespace-separated AND terms within a set (npm has no comma AND), and "||"
+// separating alternative sets. Prerelease versions only satisfy a range when a
+// comparator in the same tuple names the same Major.Minor.Patch with its own
+// prerelease, matching npm's default (includePrerelease=false) behaviour. A
+// range expression that does not fit the grammar is an error rather than a
+// wildcard, so ParseRange("latest") fails and Satisfies never admits a version
+// against an unparseable range.
 //
 // Everything is deterministic and depends only on the standard library.
 package semver
@@ -78,17 +84,21 @@ type Version struct {
 	Build []string
 }
 
-// Parse parses a semantic version string, tolerating an optional leading "v" or
-// "=" and surrounding whitespace. It returns ErrInvalidVersion (wrapped) when
-// the string is not a valid version.
+// Parse parses a semantic version string, tolerating surrounding whitespace and
+// a single optional leading lowercase "v". It returns ErrInvalidVersion
+// (wrapped) when the string is not a valid version.
+//
+// This is node-semver's strict grammar, whose regexp is anchored "^v?" after a
+// trim: an uppercase "V" and a leading "=" belong to its loose mode and are
+// rejected here. Clean, which mirrors upstream's clean(), strips those prefixes
+// before parsing, and a leading "=" inside a range expression is the equality
+// operator, handled by the range parser.
 func Parse(s string) (*Version, error) {
 	if len(s) > semMaxLength {
 		return nil, fmt.Errorf("%w: too long", ErrInvalidVersion)
 	}
 	raw := strings.TrimSpace(s)
-	raw = strings.TrimPrefix(raw, "=")
-	raw = strings.TrimSpace(raw)
-	if len(raw) > 0 && (raw[0] == 'v' || raw[0] == 'V') {
+	if len(raw) > 0 && raw[0] == 'v' {
 		raw = raw[1:]
 	}
 	if raw == "" {
@@ -162,10 +172,12 @@ func Valid(s string) bool {
 	return err == nil
 }
 
-// Clean returns the canonical string form of s (dropping a leading "v"/"=" and
-// surrounding whitespace) when s is a valid version, or "" when it is not.
+// Clean returns the canonical string form of s when s is a valid version, or ""
+// when it is not. Like node-semver's clean() it is more permissive than Parse:
+// it first trims surrounding whitespace and strips any run of leading "=" and
+// "v" characters, so "=v1.2.3" cleans to "1.2.3".
 func Clean(s string) string {
-	v, err := Parse(s)
+	v, err := Parse(strings.TrimLeft(strings.TrimSpace(s), "=v"))
 	if err != nil {
 		return ""
 	}
@@ -275,17 +287,55 @@ func EQ(a, b string) bool { return Compare(a, b) == 0 }
 // NEQ reports whether version strings a and b differ in precedence.
 func NEQ(a, b string) bool { return Compare(a, b) != 0 }
 
-// Sort sorts a slice of version strings ascending, in place. Invalid strings
-// cause a panic; validate untrusted input first.
+// Sort sorts a slice of version strings ascending, in place, keeping each
+// string exactly as it was given. Invalid strings cause a panic; validate
+// untrusted input first.
+//
+// Ties in precedence are broken by build metadata, as npm semver's sort() does
+// (it orders with compareBuild, not compare), so "1.0.0+a" sorts before
+// "1.0.0+b" and a version with no build metadata sorts before one that has it.
 func Sort(versions []string) {
-	parsed := make([]*Version, len(versions))
+	type entry struct {
+		raw string
+		v   *Version
+	}
+	parsed := make([]entry, len(versions))
 	for i, s := range versions {
-		parsed[i] = MustParse(s)
+		parsed[i] = entry{raw: s, v: MustParse(s)}
 	}
-	sort.SliceStable(parsed, func(i, j int) bool { return parsed[i].Compare(parsed[j]) < 0 })
-	for i, v := range parsed {
-		versions[i] = v.String()
+	sort.SliceStable(parsed, func(i, j int) bool {
+		return semCompareBuild(parsed[i].v, parsed[j].v) < 0
+	})
+	for i, e := range parsed {
+		versions[i] = e.raw
 	}
+}
+
+// semCompareBuild is Compare with build metadata as a final tiebreak, mirroring
+// node-semver's compareBuild. Build identifiers compare exactly like prerelease
+// identifiers, except that having no build metadata sorts first.
+func semCompareBuild(a, b *Version) int {
+	if c := a.Compare(b); c != 0 {
+		return c
+	}
+	switch {
+	case len(a.Build) == 0 && len(b.Build) == 0:
+		return 0
+	case len(a.Build) == 0:
+		return -1
+	case len(b.Build) == 0:
+		return 1
+	}
+	n := len(a.Build)
+	if len(b.Build) < n {
+		n = len(b.Build)
+	}
+	for i := 0; i < n; i++ {
+		if c := semCompareIdentifier(a.Build[i], b.Build[i]); c != 0 {
+			return c
+		}
+	}
+	return semCmpInt(len(a.Build), len(b.Build))
 }
 
 // Major returns the major field of a version string.
@@ -325,13 +375,41 @@ func Prerelease(s string) (string, error) {
 	return strings.Join(v.Prerelease, "."), nil
 }
 
-// Inc returns the version string incremented at the given release level, which
-// must be "major", "minor" or "patch". It returns an error for an invalid
-// version or an unknown release level.
+// Inc returns the version string incremented at the given release level. It
+// accepts every level npm semver's inc() accepts: "major", "minor", "patch",
+// "premajor", "preminor", "prepatch", "prerelease" and "release". It returns an
+// error for an invalid version or an unknown release level.
+//
+// The pre* levels bump the corresponding numeric field and then start a
+// prerelease at ".0"; "prerelease" bumps the trailing numeric prerelease
+// identifier of an existing prerelease, or acts like "prepatch" on a release
+// version; and "release" strips the prerelease from a prerelease version and
+// fails on a version that has none.
 func Inc(s, release string) (string, error) {
+	return IncWith(s, release, "")
+}
+
+// IncWith is Inc with an explicit prerelease identifier, the second argument of
+// npm semver's inc(version, release, identifier). With identifier "beta",
+// incrementing "1.2.3" as "prepatch" yields "1.2.4-beta.0", and incrementing
+// "1.2.4-beta.0" as "prerelease" yields "1.2.4-beta.1". An empty identifier
+// reproduces Inc's bare numeric prerelease.
+//
+// A non-empty identifier must itself be a legal prerelease: a dot-separated list
+// of identifiers, each alphanumeric-with-hyphens or a numeric field without a
+// leading zero. npm semver checks the identifier against its PRERELEASE pattern
+// the same way and returns null for, say, "bad id" or "01".
+func IncWith(s, release, identifier string) (string, error) {
 	v, err := Parse(s)
 	if err != nil {
 		return "", err
+	}
+	if identifier != "" {
+		for _, id := range strings.Split(identifier, ".") {
+			if !semIsPrereleaseID(id) {
+				return "", fmt.Errorf("%w: invalid prerelease identifier %q", ErrInvalidVersion, identifier)
+			}
+		}
 	}
 	switch release {
 	case "major":
@@ -340,9 +418,80 @@ func Inc(s, release string) (string, error) {
 		return v.IncMinor().String(), nil
 	case "patch":
 		return v.IncPatch().String(), nil
+	case "premajor":
+		// npm semver clears the prerelease and bumps major unconditionally
+		// here. It deliberately does NOT reuse the "major" rule, which skips
+		// the bump when minor, patch and prerelease say the version is already
+		// an unreleased major (so inc("1.0.0-1","major") is "1.0.0" but
+		// inc("1.0.0-1","premajor") is "2.0.0-0").
+		base := &Version{Major: v.Major + 1}
+		return incPre(base, identifier).String(), nil
+	case "preminor":
+		// As above: minor is bumped unconditionally after dropping any
+		// prerelease, so inc("1.2.0-1","preminor") is "1.3.0-0", not
+		// "1.2.0-0".
+		base := &Version{Major: v.Major, Minor: v.Minor + 1}
+		return incPre(base, identifier).String(), nil
+	case "prepatch":
+		// Any existing prerelease is irrelevant at this point, so drop it
+		// before bumping the patch, matching npm semver.
+		base := &Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
+		return incPre(base.IncPatch(), identifier).String(), nil
+	case "prerelease":
+		next := v
+		if len(v.Prerelease) == 0 {
+			next = v.IncPatch()
+		} else {
+			next = &Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch,
+				Prerelease: append([]string(nil), v.Prerelease...)}
+		}
+		return incPre(next, identifier).String(), nil
+	case "release":
+		if len(v.Prerelease) == 0 {
+			return "", fmt.Errorf("semver: version %q is not a prerelease", s)
+		}
+		return (&Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}).String(), nil
 	default:
 		return "", fmt.Errorf("semver: unknown release level %q", release)
 	}
+}
+
+// incPre advances v's prerelease, reproducing npm semver's internal "pre"
+// increment. With no existing prerelease it starts at "0". Otherwise it
+// increments the last numeric identifier, or appends "0" when none of the
+// identifiers is numeric. A non-empty identifier replaces the prerelease with
+// [identifier, 0] unless the prerelease already starts with that identifier and
+// carries a numeric counter, in which case only the counter advances.
+func incPre(v *Version, identifier string) *Version {
+	pre := append([]string(nil), v.Prerelease...)
+
+	if len(pre) == 0 {
+		pre = []string{"0"}
+	} else {
+		bumped := false
+		for i := len(pre) - 1; i >= 0; i-- {
+			if n, ok := semParseNumericID(pre[i]); ok {
+				pre[i] = strconv.FormatUint(n+1, 10)
+				bumped = true
+				break
+			}
+		}
+		if !bumped {
+			pre = append(pre, "0")
+		}
+	}
+
+	if identifier != "" {
+		if len(v.Prerelease) > 0 && v.Prerelease[0] == identifier && len(v.Prerelease) > 1 {
+			if _, ok := semParseNumericID(v.Prerelease[1]); ok {
+				// The counter was already advanced above; keep it.
+				return &Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch, Prerelease: pre}
+			}
+		}
+		pre = []string{identifier, "0"}
+	}
+
+	return &Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch, Prerelease: pre}
 }
 
 // Coerce extracts the first version-like sequence from arbitrary text and
@@ -413,12 +562,16 @@ func Coerce(s string) (string, error) {
 
 func semIsDigitByte(c byte) bool { return c >= '0' && c <= '9' }
 
-// semCoerceField parses a coerced numeric component (empty means 0) and rejects
-// values above MAX_SAFE_INTEGER, mirroring parse() failing on an out-of-range
-// component.
+// semCoerceField parses a coerced numeric component (empty means 0). It rejects
+// values above MAX_SAFE_INTEGER and components with a leading zero: upstream
+// coerce() reassembles the matched digit runs verbatim and hands the result to
+// parse(), so "01.02.03" coerces to nothing rather than to 1.2.3.
 func semCoerceField(s string) (uint64, error) {
 	if s == "" {
 		return 0, nil
+	}
+	if len(s) > 1 && s[0] == '0' {
+		return 0, fmt.Errorf("%w: numeric field %q has a leading zero", ErrInvalidVersion, s)
 	}
 	nv, err := strconv.ParseUint(s, 10, 64)
 	if err != nil {

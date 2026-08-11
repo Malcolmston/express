@@ -13,7 +13,6 @@ func TestParseValid(t *testing.T) {
 	}{
 		{"1.2.3", 1, 2, 3, nil, nil},
 		{"v1.2.3", 1, 2, 3, nil, nil},
-		{"=1.2.3", 1, 2, 3, nil, nil},
 		{" 1.0.0 ", 1, 0, 0, nil, nil},
 		{"0.0.0", 0, 0, 0, nil, nil},
 		{"1.2.3-alpha.1", 1, 2, 3, []string{"alpha", "1"}, nil},
@@ -39,7 +38,7 @@ func TestParseValid(t *testing.T) {
 }
 
 func TestParseInvalid(t *testing.T) {
-	for _, in := range []string{"", "1", "1.2", "1.2.3.4", "01.2.3", "1.2.3-", "1.2.3+", "a.b.c", "1.2.3-01", "-1.2.3"} {
+	for _, in := range []string{"", "1", "1.2", "1.2.3.4", "01.2.3", "1.2.3-", "1.2.3+", "a.b.c", "1.2.3-01", "-1.2.3", "=1.2.3", "V1.2.3"} {
 		if Valid(in) {
 			t.Errorf("Valid(%q) = true, want false", in)
 		}

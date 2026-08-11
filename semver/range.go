@@ -129,49 +129,48 @@ func Satisfies(version, constraint string) bool {
 }
 
 // MaxSatisfying returns the highest version in versions that satisfies the
-// range, or "" (and ok=false) if none do. Invalid version strings are skipped.
+// range, or "" (and ok=false) if none do. Invalid version strings are skipped,
+// and an unparseable range satisfies nothing. The returned string is the
+// matching element exactly as it was given, as npm semver's maxSatisfying
+// returns it, so a "v"-prefixed input comes back "v"-prefixed.
 func MaxSatisfying(versions []string, constraint string) (string, bool) {
-	r, err := ParseRange(constraint)
-	if err != nil {
-		return "", false
-	}
-	var best *Version
-	for _, s := range versions {
-		v, err := Parse(s)
-		if err != nil || !r.Test(v) {
-			continue
-		}
-		if best == nil || v.Compare(best) > 0 {
-			best = v
-		}
-	}
-	if best == nil {
-		return "", false
-	}
-	return best.String(), true
+	return semSatisfyingPick(versions, constraint, true)
 }
 
 // MinSatisfying returns the lowest version in versions that satisfies the
-// range, or "" (and ok=false) if none do. Invalid version strings are skipped.
+// range, or "" (and ok=false) if none do. Invalid version strings are skipped,
+// and an unparseable range satisfies nothing. Like MaxSatisfying it returns the
+// matching element unchanged.
 func MinSatisfying(versions []string, constraint string) (string, bool) {
+	return semSatisfyingPick(versions, constraint, false)
+}
+
+// semSatisfyingPick backs MaxSatisfying and MinSatisfying: the first satisfying
+// element wins a tie, so the result is stable in the input order.
+func semSatisfyingPick(versions []string, constraint string, max bool) (string, bool) {
 	r, err := ParseRange(constraint)
 	if err != nil {
 		return "", false
 	}
 	var best *Version
+	bestRaw := ""
 	for _, s := range versions {
 		v, err := Parse(s)
 		if err != nil || !r.Test(v) {
 			continue
 		}
-		if best == nil || v.Compare(best) < 0 {
-			best = v
+		c := 0
+		if best != nil {
+			c = v.Compare(best)
+		}
+		if best == nil || (max && c > 0) || (!max && c < 0) {
+			best, bestRaw = v, s
 		}
 	}
 	if best == nil {
 		return "", false
 	}
-	return best.String(), true
+	return bestRaw, true
 }
 
 // --- range parsing ----------------------------------------------------------
@@ -202,14 +201,18 @@ func semParseComparatorSet(s string) ([]semComparator, error) {
 }
 
 func semParseHyphen(lo, hi string) ([]semComparator, error) {
-	lv, err := semCoercePartial(lo, false)
+	lp, err := semParsePartial(lo)
 	if err != nil {
 		return nil, err
 	}
-	// lower bound: if partial, floor to .0.0 already done by semCoercePartial
-	set := []semComparator{{op: semGTE, v: lv}}
-	// upper bound
-	hp := semSplitPartial(hi)
+	hp, err := semParsePartial(hi)
+	if err != nil {
+		return nil, err
+	}
+	// Lower bound: a partial version floors to .0.0, which the cascade in
+	// semParsePartial has already done.
+	set := []semComparator{{op: semGTE, v: &Version{Major: lp.major, Minor: lp.minor, Patch: lp.patch, Prerelease: lp.pre}}}
+	// Upper bound.
 	if hp.majorX {
 		// hyphen upper bound of "x" imposes no upper limit.
 	} else if hp.minorX {
@@ -226,60 +229,134 @@ type semPartial struct {
 	major, minor, patch    uint64
 	majorX, minorX, patchX bool
 	pre                    []string
+
+	// The three fields exactly as written, before the cascade above collapses
+	// "anything after a wildcard" into a wildcard. minorSet/patchSet say whether
+	// the field was present at all, rawMinorX/rawPatchX whether that present
+	// field was itself a wildcard. Only invalidXRangeOrder needs this detail.
+	minorSet, patchSet   bool
+	rawMinorX, rawPatchX bool
 }
 
-func semSplitPartial(s string) semPartial {
+// invalidXRangeOrder reports whether a numeric field follows a wildcard one,
+// as in "1.x.3" or "x.2.3". node-semver's replaceXRange refuses to expand such
+// a token, which then fails as an invalid comparator, so the whole range is
+// invalid. Caret, tilde and hyphen ranges do not apply this rule: they ignore
+// the fields after the first wildcard instead.
+func (p semPartial) invalidXRangeOrder() bool {
+	if p.majorX && p.minorSet && !p.rawMinorX {
+		return true
+	}
+	minorIsX := p.majorX || !p.minorSet || p.rawMinorX
+	return minorIsX && p.patchSet && !p.rawPatchX
+}
+
+// semParsePartial parses one range token's version part — node-semver's
+// XRANGEPLAIN: an optional run of "v", "=" and whitespace, then one to three
+// dot-separated fields each of which is a numeric field without a leading zero
+// or a wildcard ("x", "X", "*"), then, only when all three fields are present,
+// an optional prerelease and build metadata. Anything else is an error, which is
+// how a bogus range ("garbage", ">=1.0.0, <2.0.0", ">=01.2.3", "^latest") comes
+// to be rejected rather than silently treated as a wildcard.
+func semParsePartial(s string) (semPartial, error) {
 	p := semPartial{}
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "v")
-	// strip build
-	if i := strings.IndexByte(s, '+'); i >= 0 {
-		s = s[:i]
+	bad := func(why string) (semPartial, error) {
+		return semPartial{}, fmt.Errorf("%w: range %q: %s", ErrInvalidVersion, s, why)
 	}
-	if i := strings.IndexByte(s, '-'); i >= 0 {
-		p.pre = strings.Split(s[i+1:], ".")
-		s = s[:i]
+	// [v=\s]* — the same prefix run node-semver's XRANGEPLAIN allows.
+	rest := strings.TrimLeft(s, "v= \t")
+	if rest == "" {
+		return bad("empty comparator")
 	}
-	parts := strings.Split(s, ".")
-	get := func(idx int) (uint64, bool) {
-		if idx >= len(parts) {
-			return 0, true // missing -> x
-		}
-		t := parts[idx]
-		if t == "" || t == "x" || t == "X" || t == "*" {
-			return 0, true
-		}
-		n, err := strconv.ParseUint(t, 10, 64)
-		if err != nil {
-			return 0, true
-		}
-		return n, false
-	}
-	var xr bool
-	p.major, xr = get(0)
-	if xr {
-		p.majorX = true
-		p.minorX = true
-		p.patchX = true
-		return p
-	}
-	p.minor, xr = get(1)
-	if xr {
-		p.minorX = true
-		p.patchX = true
-		return p
-	}
-	p.patch, xr = get(2)
-	if xr {
-		p.patchX = true
-	}
-	return p
-}
 
-// semCoercePartial turns a partial version into a concrete lower-bound Version.
-func semCoercePartial(s string, upper bool) (*Version, error) {
-	p := semSplitPartial(s)
-	return &Version{Major: p.major, Minor: p.minor, Patch: p.patch, Prerelease: p.pre}, nil
+	// field reads one wildcard-or-numeric field and reports whether it was a
+	// wildcard.
+	field := func(tok string) (uint64, bool, error) {
+		switch tok {
+		case "x", "X", "*":
+			return 0, true, nil
+		}
+		if !semIsNumericID(tok) {
+			return 0, false, fmt.Errorf("%w: range %q: %q is not a version field", ErrInvalidVersion, s, tok)
+		}
+		if len(tok) > 1 && tok[0] == '0' {
+			return 0, false, fmt.Errorf("%w: range %q: field %q has a leading zero", ErrInvalidVersion, s, tok)
+		}
+		n, err := strconv.ParseUint(tok, 10, 64)
+		if err != nil || n > semMaxSafeInteger {
+			return 0, false, fmt.Errorf("%w: range %q: field %q is too big", ErrInvalidVersion, s, tok)
+		}
+		return n, false, nil
+	}
+
+	// Split off the prerelease and build metadata, which only the three-field
+	// form may carry; the check that all three fields are present happens below.
+	core := rest
+	var pre, build []string
+	if i := strings.IndexByte(core, '+'); i >= 0 {
+		b := core[i+1:]
+		core = core[:i]
+		if b == "" {
+			return bad("empty build metadata")
+		}
+		build = strings.Split(b, ".")
+		for _, id := range build {
+			if !semIsBuildID(id) {
+				return bad("invalid build identifier " + strconv.Quote(id))
+			}
+		}
+	}
+	if i := strings.IndexByte(core, '-'); i >= 0 {
+		pr := core[i+1:]
+		core = core[:i]
+		if pr == "" {
+			return bad("empty prerelease")
+		}
+		pre = strings.Split(pr, ".")
+		for _, id := range pre {
+			if !semIsPrereleaseID(id) {
+				return bad("invalid prerelease identifier " + strconv.Quote(id))
+			}
+		}
+	}
+
+	parts := strings.Split(core, ".")
+	if len(parts) > 3 {
+		return bad("more than three version fields")
+	}
+	if (len(pre) > 0 || len(build) > 0) && len(parts) != 3 {
+		return bad("a partial version may not carry a prerelease or build metadata")
+	}
+	var err error
+	if p.major, p.majorX, err = field(parts[0]); err != nil {
+		return semPartial{}, err
+	}
+	if len(parts) > 1 {
+		p.minorSet = true
+		if p.minor, p.rawMinorX, err = field(parts[1]); err != nil {
+			return semPartial{}, err
+		}
+	}
+	if len(parts) > 2 {
+		p.patchSet = true
+		if p.patch, p.rawPatchX, err = field(parts[2]); err != nil {
+			return semPartial{}, err
+		}
+	}
+	p.pre = pre
+
+	// Cascade: once a field is a wildcard (or absent) every lower field is one
+	// too, and its numeric value is meaningless.
+	p.minorX = p.majorX || !p.minorSet || p.rawMinorX
+	p.patchX = p.minorX || !p.patchSet || p.rawPatchX
+	if p.majorX {
+		p.major, p.minor, p.patch = 0, 0, 0
+	} else if p.minorX {
+		p.minor, p.patch = 0, 0
+	} else if p.patchX {
+		p.patch = 0
+	}
+	return p, nil
 }
 
 func semParseSingle(f string) ([]semComparator, error) {
@@ -303,7 +380,13 @@ func semParseSingle(f string) ([]semComparator, error) {
 
 func semParseOpVersion(opStr, rest string) ([]semComparator, error) {
 	op := map[string]semOp{">=": semGTE, "<=": semLTE, ">": semGT, "<": semLT, "=": semEQ}[opStr]
-	p := semSplitPartial(rest)
+	p, err := semParsePartial(rest)
+	if err != nil {
+		return nil, err
+	}
+	if p.invalidXRangeOrder() {
+		return nil, fmt.Errorf("%w: range %q%q: a numeric field follows a wildcard", ErrInvalidVersion, opStr, rest)
+	}
 	anyX := p.majorX || p.minorX || p.patchX
 
 	// An operator applied to a partial ("x-range") version expands per
@@ -377,11 +460,23 @@ func semParseXRange(f string) ([]semComparator, error) {
 	if f == "" || f == "*" || f == "x" || f == "X" {
 		return []semComparator{{op: semGTE, v: &Version{}}}, nil
 	}
-	return semXRangeSet(semSplitPartial(f)), nil
+	p, err := semParsePartial(f)
+	if err != nil {
+		return nil, err
+	}
+	if p.invalidXRangeOrder() {
+		return nil, fmt.Errorf("%w: range %q: a numeric field follows a wildcard", ErrInvalidVersion, f)
+	}
+	return semXRangeSet(p), nil
 }
 
 func semParseCaret(rest string) ([]semComparator, error) {
-	p := semSplitPartial(rest)
+	// Caret, tilde and hyphen ranges do not reject "1.x.3": node-semver expands
+	// them from the first wildcard on and ignores the rest.
+	p, err := semParsePartial(rest)
+	if err != nil {
+		return nil, err
+	}
 	if p.majorX {
 		// "^x"/"^*" impose no constraint.
 		return []semComparator{{op: semGTE, v: &Version{}}}, nil
@@ -400,7 +495,10 @@ func semParseCaret(rest string) ([]semComparator, error) {
 }
 
 func semParseTilde(rest string) ([]semComparator, error) {
-	p := semSplitPartial(rest)
+	p, err := semParsePartial(rest)
+	if err != nil {
+		return nil, err
+	}
 	if p.majorX {
 		// "~x"/"~*" impose no constraint.
 		return []semComparator{{op: semGTE, v: &Version{}}}, nil

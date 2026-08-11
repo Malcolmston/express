@@ -44,3 +44,43 @@ byte** rather than errors), `Format` breaks a rounding tie away from zero like
 `toFixed` rather than to even like `strconv.FormatFloat`, and its trailing-zero
 trimmer is upstream's regexp, which cannot touch a fractional part that begins
 with a zero (`"1.010KB"` stays).
+
+## `qs` (npm `qs`, oracle `qs@6.15.3`)
+
+Parity: 268/268 compared cases (100%), 3 deviations.
+Harness: `parity/express/nested/qs/`. Inventory: that harness's `COVERAGE.md`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `ParseOptions.Depth` cannot express upstream's `depth: 0`, which disables bracket parsing entirely so that `a[b]=c` yields the single literal key `a[b]`. | `o-depth-zero` | The port's int options use 0 to mean "the documented default" and a negative value to mean "no limit", because Go cannot tell an unset field from an explicit zero. Spending a third sentinel — or a `*int` — on a mode whose whole effect is "do not parse the syntax this package exists to parse" is a worse API than pointing at `net/url`, which already does exactly that. |
+| An option value upstream rejects with a `TypeError` is treated here as the documented default: an unrecognised `Duplicates` becomes `combine`, and an unrecognised `Format` becomes `FormatRFC3986`. | `d-bad-duplicates`, `t-fmt-bad` | `ParseWith` returns a `map[string]any` and `StringifyWith` returns a `string`; neither has an error channel, and adding one would change both signatures for the sake of a programmer error a Go caller expresses with the package's own exported constants (`qs.DuplicatesLast`, `qs.FormatRFC1738`) rather than a bare string. Note that this is *not* the port accepting hostile input upstream refuses — both of these are misconfigurations by the calling program, never something a request can trigger. |
+| Keys are emitted in sorted order at every level of `StringifyWith`, where upstream follows JavaScript object insertion order unless given a `sort` comparator. | every `stringify` case | A Go map has no insertion order to follow, so the only alternatives are "sorted" and "random". The harness closes the gap from the other side, handing upstream a code-unit comparator that reproduces `sort.Strings`. |
+
+Everything else is upstream's behaviour, including the parts that surprise:
+the prototype guard drops the *whole* pair for `a[__proto__][b]=c` rather than
+just the offending level, and it also drops `toString=x` and
+`constructor[prototype][x]=y`; `arrayLimit` is tested with a strict `<`, so at
+the default of 20 the index `a[20]` is already an object key; `%5B`/`%5D` are
+rewritten to literal brackets across the *whole* query string before the
+key/value split point is chosen, so an encoded `]` inside a value can move that
+boundary (`a=1%5D=2` has the key `a=1]`); a leading `?` is only special when
+`IgnoreQueryPrefix` is set; and a value that fails to percent-decode is returned
+with its `+` already turned into a space rather than reported as an error.
+
+## `semver` (npm `semver`, oracle `semver@7.8.5`)
+
+Parity: 313/313 compared cases (100%), 7 deviations.
+Harness: `parity/express/nested/semver/`.
+
+| deviation | parity case | why |
+| --- | --- | --- |
+| `Version.String` — and `Clean`, which is defined in terms of it — keeps build metadata, where upstream's `SemVer#version`/`toString()` and `clean()` drop it (`"1.2.3+build.5"` renders as itself, not as `"1.2.3"`). | `p-build`, `p-build-only-dash`, `p-build-leadzero`, `p-pre-and-build`, `cl-build` | node-semver can afford to drop it because it keeps the original text in `SemVer#raw`; the Go type has no `raw` field, so a `String` that dropped build metadata would make `Parse` → `String` lossy and leave the `Build` slice unrenderable. Build metadata is part of the version per the 2.0.0 spec — it is only excluded from *precedence*, which `Compare` gets right. |
+| `Range.String` returns the expression the range was parsed from; upstream's `Range#range` returns the normalised comparator set (`"^1.2.3"` → `">=1.2.3 <2.0.0-0"`, `"*"` → `""`). | `rs-caret`, `rs-star` | The port expands a range into comparators internally but does not model the `-0` prerelease sentinel upstream uses to write those bounds down; it gets the same answers from an explicit prerelease rule instead. Rendering a comparator set it does not literally hold would be a fiction, and echoing the source expression is the more useful `String` for a Go value that is otherwise opaque. `Range.Test` — the part callers act on — matches upstream exactly. |
+
+Not deviations, and fixed rather than excused during the 7.8.5 measurement:
+`Parse` no longer accepts the loose-mode-only `=`/`V` prefixes (`Clean` still
+strips them, as upstream's `clean()` does), `ParseRange` rejects a range string
+that does not fit npm's grammar instead of treating it as a wildcard, `Coerce`
+rejects a component with a leading zero, `IncWith` validates its identifier, and
+`Sort` preserves the input strings and breaks precedence ties with build
+metadata like upstream's `compareBuild`.
