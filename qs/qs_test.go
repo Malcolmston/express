@@ -60,9 +60,18 @@ func TestParseEmpty(t *testing.T) {
 	}
 }
 
+// TestParseLeadingQuestionMark pins upstream's behaviour, which is that a
+// leading "?" is *not* special unless ignoreQueryPrefix asks for it: qs.parse
+// ('?a=1') is { '?a': '1' }. This test previously asserted the "?" was always
+// stripped, which no version of qs does.
 func TestParseLeadingQuestionMark(t *testing.T) {
 	got := Parse("?a=1")
-	want := map[string]any{"a": "1"}
+	want := map[string]any{"?a": "1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %#v, want %#v", got, want)
+	}
+	got = ParseWith("?a=1", ParseOptions{IgnoreQueryPrefix: true})
+	want = map[string]any{"a": "1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
@@ -76,11 +85,16 @@ func TestParseNoValue(t *testing.T) {
 	}
 }
 
+// TestParseNestedArrayOfObjects pins what upstream actually does with a repeated
+// "a[][b]" key. The push marker only makes a new element when the pair itself
+// ends the bracket group ("a[]=…"); here the repeated key is "a[][b]", so the
+// default combine strategy gathers the two values first and one object comes
+// out. qs.parse('a[][b]=1&a[][b]=2') is { a: [ { b: ['1','2'] } ] }. The old
+// expectation of two sibling objects was never upstream's answer.
 func TestParseNestedArrayOfObjects(t *testing.T) {
 	got := Parse("a[][b]=1&a[][b]=2")
 	want := map[string]any{"a": []any{
-		map[string]any{"b": "1"},
-		map[string]any{"b": "2"},
+		map[string]any{"b": []any{"1", "2"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
